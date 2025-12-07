@@ -1,0 +1,14 @@
+# IA e Utilitários
+google-generativeai
+python-dotenv
+
+# Síntese de Voz (Text-to-Speech)
+espeak-ng
+
+# Reconhecimento de Voz (Speech-to-Text)
+sounddevice
+scipy
+numpy
+
+# Integração com Home Assistant
+requests
