@@ -1,0 +1,46 @@
+# Ambiente virtual
+venv/
+.env
+.env.*
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Banco de dados local 
+*.db
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Configurações de IDEs
+.vscode/
+.idea/
+
+# Arquivos temporários ou de log
+*.log
+*.bak
+*.swp
+*.tmp
+
+# Pasta de testes
+testes/
+coverage/
+
+# PyInstaller
+*.spec
+dist/
+build/
+
+# Arquivos gerados
+*.png
+*.svg
+*.pdf
+
+# Arquivos de testes
+listar_microfones.py
+verificar_mic.py
