@@ -40,7 +40,3 @@ build/
 *.png
 *.svg
 *.pdf
-
-# Arquivos de testes
-listar_microfones.py
-verificar_mic.py
