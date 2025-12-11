@@ -49,7 +49,6 @@ def texto_para_voz(texto):
         ]
         
         # Executa o comando, esperando que ele termine
-        # O check=True garante que levante um erro se o espeak-ng não for encontrado
         subprocess.run(command, check=True)
         
         return True 
@@ -67,27 +66,19 @@ def texto_para_voz(texto):
 
 # Função de Reconhecimento de Voz (Fala para Texto)
 def reconhecer_fala():
-    """
-    Grava áudio na taxa nativa do microfone, reamostra para 16kHz,
-    e usa o whisper.cpp para transcrever.
-    """
     try:
-        # 1. Gravar o Áudio na taxa nativa do microfone (48000 Hz)
         print(f"\nOuvindo por 5 segundos a {MIC_SAMPLE_RATE} Hz no dispositivo {DEVICE_INDEX}... Fale agora!")
         recording = sd.rec(int(5 * MIC_SAMPLE_RATE), samplerate=MIC_SAMPLE_RATE, channels=CHANNELS, dtype=DTYPE, device=DEVICE_INDEX)
         sd.wait()
         print("Gravação concluída.")
 
-        # 2. Reamostrar o áudio de 48000 Hz para 16000 Hz
         print("Reamostrando áudio para 16000 Hz...")
         number_of_samples = round(len(recording) * float(WHISPER_SAMPLE_RATE) / MIC_SAMPLE_RATE)
         resampled_recording = resample(recording, number_of_samples)
 
-        # 3. Salvar o áudio REAMOSTRADO num ficheiro .wav temporário
         write(TEMP_WAV_FILE, WHISPER_SAMPLE_RATE, resampled_recording.astype('int16'))
         print("Processando com Whisper...")
         
-        # 4. Construir e Executar o Comando do whisper.cpp
         command = [
             str(WHISPER_EXECUTABLE),
             "-m", str(MODEL_PATH),

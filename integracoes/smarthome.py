@@ -46,9 +46,6 @@ def diagnose_ha_connection():
     print("-----------------------------------")
 
 def get_ha_entity_state(entity_id: str):
-    """
-    Função para ler o estado ATUAL e os atributos de uma entidade do Home Assistant (usada para temperatura).
-    """
     if not HA_TOKEN:
         print("[HA ERROR] Token do Home Assistant não configurado.")
         return None

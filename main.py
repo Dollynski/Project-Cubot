@@ -47,7 +47,6 @@ def main():
                 print("Pensando...")
                 resposta_bruta = enviar_mensagem_gemini(entrada_usuario)
                 
-                # --- LÓGICA DE INTERCEÇÃO SMART HOME (LEITURA E ESCRITA) ---
                 if resposta_bruta.startswith("[SMART_HOME]"):
                     print("Comando Smart Home detectado.")
                     
