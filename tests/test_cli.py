@@ -10,6 +10,7 @@ from cubo.credentials import CredentialStore
 from cubo.errors import SetupError
 from cubo.llm.memory import ConversationMemory
 from cubo.tools.registry import ToolRegistry
+from cubo.voice import models
 from cubo.voice.events import Heard, Replied
 from cubo.voice.models import DownloadError
 from tests.test_assistant import FakeProvider
@@ -140,13 +141,13 @@ def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
 def test_prepare_downloads_what_the_config_asks_for(monkeypatch, capsys):
     downloads = []
     monkeypatch.setattr(
-        cli, "download_wake_word", lambda name, data_dir, _http: downloads.append(("wake", name))
+        models, "download_wake_word", lambda name, data_dir, _http: downloads.append(("wake", name))
     )
     monkeypatch.setattr(
-        cli, "download_piper_voice", lambda voice, data_dir: downloads.append(("voz", voice))
+        models, "download_piper_voice", lambda voice, data_dir: downloads.append(("voz", voice))
     )
     monkeypatch.setattr(
-        cli, "download_whisper", lambda model, data_dir: downloads.append(("whisper", model))
+        models, "download_whisper", lambda model, data_dir: downloads.append(("whisper", model))
     )
 
     assert cli.main(["preparar"]) == 0
@@ -163,7 +164,7 @@ def test_prepare_reports_a_failed_download(monkeypatch, capsys):
     def offline(*_args):
         raise DownloadError("sem rede")
 
-    monkeypatch.setattr(cli, "download_wake_word", offline)
+    monkeypatch.setattr(models, "download_wake_word", offline)
 
     assert cli.main(["preparar"]) == 1
 

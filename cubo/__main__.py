@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import get_args
 
-import httpx2
 from pydantic import ValidationError
 
 from cubo.bootstrap import Runtime, build_runtime
@@ -22,15 +21,7 @@ from cubo.migration import migrate_legacy_env
 from cubo.tools.home_assistant import HomeAssistantError
 from cubo.voice import load_devices
 from cubo.voice.events import Event, Heard, Replied, StateChanged
-from cubo.voice.models import (
-    DOWNLOAD_TIMEOUT_SECONDS,
-    WAKE_WORD_SHA256,
-    DownloadError,
-    default_data_dir,
-    download_piper_voice,
-    download_wake_word,
-    download_whisper,
-)
+from cubo.voice.models import DownloadError, default_data_dir, prepare_models
 
 # O protótipo antigo guardava a configuração num .env na pasta do projeto.
 LEGACY_ENV_PATH = Path(".env")
@@ -172,14 +163,7 @@ def _run_prepare(_args: argparse.Namespace, config_dir: Path, credentials: Crede
     data_dir = default_data_dir()
     print(f"Os modelos ficam em {data_dir}.")
     try:
-        if voice.wake_word in WAKE_WORD_SHA256:
-            print(f"Baixando a wake word '{voice.wake_word}'...")
-            with httpx2.Client(timeout=DOWNLOAD_TIMEOUT_SECONDS) as http:
-                download_wake_word(voice.wake_word, data_dir, http)
-        print(f"Baixando a voz '{voice.piper_voice}'...")
-        download_piper_voice(voice.piper_voice, data_dir)
-        print(f"Baixando o modelo de transcrição '{voice.whisper_model}'...")
-        download_whisper(voice.whisper_model, data_dir)
+        prepare_models(voice, data_dir, print)
     except DownloadError as error:
         print(f"Erro: {error}", file=sys.stderr)
         return 1
