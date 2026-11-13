@@ -10,6 +10,7 @@ from cubo.voice import session as session_module
 from cubo.voice.audio import AudioClip
 from cubo.voice.listening import ListeningLimits
 from cubo.voice.session import VoiceSession
+from cubo.voice.tts import WARM_UP_TEXT
 
 SILENCE = np.zeros(1280, np.float32)
 
@@ -63,23 +64,31 @@ class Loaders:
         self.synthesizers = []
         self.microphones = []
         self.players = []
-        self.wake_word_error = None
+        self.wake_words = []
+        self.transcribers = []
+        self.detectors = []
         self.transcriber_error = None
         monkeypatch.setattr(session_module, "load_wake_word", self._wake_word)
         monkeypatch.setattr(session_module, "load_transcriber", self._transcriber)
         monkeypatch.setattr(session_module, "load_synthesizer", self._synthesizer)
-        monkeypatch.setattr(session_module, "SpeechDetector", lambda: "vad")
+        monkeypatch.setattr(session_module, "SpeechDetector", self._detector)
         monkeypatch.setattr(session_module, "load_devices", self._devices)
 
     def _wake_word(self, settings, _data_dir):
         self.calls.append("wake_word")
-        return FakeWakeWord()
+        self.wake_words.append(FakeWakeWord())
+        return self.wake_words[-1]
+
+    def _detector(self):
+        self.detectors.append(FakeDetector())
+        return self.detectors[-1]
 
     def _transcriber(self, settings, _data_dir):
         self.calls.append("transcriber")
         if self.transcriber_error:
             raise self.transcriber_error
-        return "stt"
+        self.transcribers.append(FakeTranscriber())
+        return self.transcribers[-1]
 
     def _synthesizer(self, settings, _data_dir, _warnings):
         self.calls.append("synthesizer")
@@ -102,13 +111,41 @@ class Loaders:
 
 
 class FakeWakeWord:
-    crash = None
+    def __init__(self):
+        self.warm_ups = 0
 
     def detected(self, _frame):
         return False
 
     def reset(self):
         pass
+
+    def warm_up(self):
+        self.warm_ups += 1
+
+
+class FakeTranscriber:
+    def __init__(self):
+        self.warm_ups = 0
+        self.warm_up_error = None
+
+    def warm_up(self):
+        if self.warm_up_error:
+            raise self.warm_up_error
+        self.warm_ups += 1
+
+
+class FakeDetector:
+    def __init__(self):
+        self.warm_ups = 0
+
+    def warm_up(self):
+        self.warm_ups += 1
+
+
+def spoken(synthesizer):
+    """O que foi pedido ao sintetizador, sem o aquecimento."""
+    return [text for text in synthesizer.texts if text != WARM_UP_TEXT]
 
 
 @pytest.fixture
@@ -187,8 +224,8 @@ def test_reconfigure_reloads_only_the_part_that_changed(loaders, tmp_path):
     assert changed == ["voz"]
     assert loaders.calls == ["synthesizer"]
     session.say("oi")
-    assert loaders.synthesizers[0].texts == []
-    assert loaders.synthesizers[1].texts == ["oi"]
+    assert spoken(loaders.synthesizers[0]) == []
+    assert spoken(loaders.synthesizers[1]) == ["oi"]
 
 
 def test_reconfigure_reports_every_part_in_a_fixed_order(loaders, tmp_path):
@@ -211,7 +248,7 @@ def test_new_output_device_keeps_the_current_voice(loaders, tmp_path):
     session.say("oi")
     assert loaders.players[1].device == "Fone"
     assert len(loaders.players[1].clips) == 1
-    assert loaders.synthesizers[0].texts == ["oi"]
+    assert spoken(loaders.synthesizers[0]) == ["oi"]
 
 
 def test_a_failed_reload_leaves_the_session_as_it_was(loaders, tmp_path):
@@ -223,7 +260,7 @@ def test_a_failed_reload_leaves_the_session_as_it_was(loaders, tmp_path):
 
     assert session.settings == VoiceSettings()
     session.say("oi")
-    assert loaders.synthesizers[0].texts == ["oi"]
+    assert spoken(loaders.synthesizers[0]) == ["oi"]
 
 
 def test_changing_the_microphone_restarts_the_listening(loaders, tmp_path):
@@ -289,3 +326,62 @@ def test_stop_without_start_is_harmless(loaders, tmp_path):
     session.stop()
 
     assert not session.running
+
+
+def test_every_model_is_warmed_up_before_the_first_request(loaders, tmp_path):
+    make_session(tmp_path)
+
+    assert loaders.wake_words[0].warm_ups == 1
+    assert loaders.transcribers[0].warm_ups == 1
+    assert loaders.detectors[0].warm_ups == 1
+    assert loaders.synthesizers[0].texts == [WARM_UP_TEXT]
+
+
+def test_reconfigure_warms_up_only_the_new_part(loaders, tmp_path):
+    session = make_session(tmp_path)
+
+    session.reconfigure(VoiceSettings(speech_speed=1.5))
+
+    assert loaders.synthesizers[1].texts == [WARM_UP_TEXT]
+    assert loaders.transcribers[0].warm_ups == 1
+    assert loaders.wake_words[0].warm_ups == 1
+    assert len(loaders.transcribers) == 1
+
+
+def test_a_new_model_that_fails_to_warm_up_leaves_the_session_as_it_was(
+    loaders, monkeypatch, tmp_path
+):
+    session = make_session(tmp_path)
+    original_load = loaders._transcriber
+
+    def broken_transcriber(settings, data_dir):
+        transcriber = original_load(settings, data_dir)
+        transcriber.warm_up_error = RuntimeError("modelo corrompido")
+        return transcriber
+
+    monkeypatch.setattr(session_module, "load_transcriber", broken_transcriber)
+
+    with pytest.raises(RuntimeError, match="corrompido"):
+        session.reconfigure(VoiceSettings(whisper_model="small", speech_speed=1.5))
+
+    assert session.settings == VoiceSettings()
+    session.say("oi")
+    assert spoken(loaders.synthesizers[0]) == ["oi"]
+
+
+def test_the_streaming_option_comes_from_the_settings(loaders, tmp_path):
+    session = make_session(tmp_path, stream_speech=False)
+
+    assert session._loop.stream_speech is False
+
+
+def test_the_streaming_option_changes_without_reloading_anything(loaders, tmp_path):
+    session = make_session(tmp_path)
+    loaders.calls.clear()
+
+    changed = session.reconfigure(VoiceSettings(stream_speech=False))
+
+    assert changed == []
+    assert loaders.calls == []
+    assert session._loop.stream_speech is False
+    assert session.settings.stream_speech is False

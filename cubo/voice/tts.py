@@ -13,6 +13,7 @@ from piper import PiperVoice, SynthesisConfig
 from cubo.voice.audio import SAMPLE_RATE, AudioClip, chime, to_float32
 
 ESPEAK_BASE_WORDS_PER_MINUTE = 160
+WARM_UP_TEXT = "Oi."
 
 
 class SynthesisError(Exception):
@@ -82,6 +83,10 @@ class Speaker:
         self._synthesizer = synthesizer
         self._player = player
         self._chime = chime()
+
+    def warm_up(self) -> None:
+        """Sintetiza uma frase curta e descarta, para a primeira fala de verdade não demorar."""
+        self.synthesize(WARM_UP_TEXT)
 
     def synthesize(self, text: str) -> AudioClip:
         return self._synthesizer.synthesize(text)

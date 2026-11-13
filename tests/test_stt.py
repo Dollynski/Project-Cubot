@@ -51,3 +51,11 @@ def test_transcribes_in_portuguese_without_a_second_vad_pass(tmp_path):
 
     assert model.calls[0]["language"] == "pt"
     assert model.calls[0]["vad_filter"] is False
+
+
+def test_warm_up_runs_a_silent_transcription_without_failing(tmp_path):
+    model = FakeWhisper([])
+
+    Transcriber("base", "int8", tmp_path, model=model).warm_up()
+
+    assert len(model.calls) == 1

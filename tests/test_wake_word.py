@@ -40,3 +40,22 @@ def test_reset_clears_the_model_state(tmp_path):
     WakeWordDetector(tmp_path / "x.onnx", 0.5, model=model).reset()
 
     assert model.resets == 1
+
+
+def test_warm_up_runs_one_silent_frame_and_clears_the_state(tmp_path):
+    class RecordingModel(FakeWakeModel):
+        def __init__(self):
+            super().__init__({})
+            self.frames = []
+
+        def predict(self, frame):
+            self.frames.append(frame)
+            return {}
+
+    model = RecordingModel()
+
+    WakeWordDetector(tmp_path / "x.onnx", 0.5, model=model).warm_up()
+
+    assert len(model.frames) == 1
+    assert not model.frames[0].any()
+    assert model.resets == 1

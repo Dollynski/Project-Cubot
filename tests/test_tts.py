@@ -155,3 +155,12 @@ def test_speaker_chime_plays_without_synthesizing():
     assert synthesizer.texts == []
     assert player.clips[0].sample_rate == SAMPLE_RATE
     assert len(player.clips[0].samples) > 0
+
+
+def test_speaker_warm_up_synthesizes_a_short_phrase_without_playing_it():
+    synthesizer, player = FixedSynthesizer(), RecordingPlayer()
+
+    Speaker(synthesizer, player).warm_up()
+
+    assert len(synthesizer.texts) == 1
+    assert player.clips == []

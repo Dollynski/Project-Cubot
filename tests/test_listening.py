@@ -100,3 +100,10 @@ def test_short_pauses_do_not_end_the_request():
     audio, _, _ = record([True, False, True, False, True, False, False, False], limits)
 
     assert len(audio) == 8 * FRAME_SAMPLES
+
+
+def test_detector_warm_up_leaves_no_memory_behind():
+    detector = SpeechDetector(model=loudness_model)
+    detector.warm_up()
+
+    assert detector.is_speech(frame(0.0)) is False

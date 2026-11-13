@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 from faster_whisper import WhisperModel
 
+from cubo.voice.audio import SAMPLE_RATE
+
 # Acima disso, o próprio Whisper acha que o trecho não tem fala (evita frases inventadas).
 NO_SPEECH_LIMIT = 0.6
 
@@ -27,6 +29,10 @@ class Transcriber:
             # Nada é baixado durante o uso: os modelos vêm do `cubo preparar`.
             local_files_only=True,
         )
+
+    def warm_up(self) -> None:
+        """Transcreve um segundo de silêncio, para o primeiro pedido não pagar a inicialização."""
+        self.transcribe(np.zeros(SAMPLE_RATE, np.float32))
 
     def transcribe(self, audio: np.ndarray) -> str:
         """Recebe float32 mono a 16 kHz e devolve o texto completo, juntando todos os trechos."""
