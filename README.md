@@ -2,16 +2,19 @@
 
 Assistente de voz open source em português, integrado ao Home Assistant. Feito para rodar numa placa ARM64 (como uma Orange Pi) ou num PC Linux.
 
-> **Em refatoração** ([#14](https://github.com/Dollynski/Project-Cubot/issues/14)). Por enquanto o Cubô funciona em **modo texto**. O pipeline de voz volta na Fase 2 ([#19](https://github.com/Dollynski/Project-Cubot/issues/19)) e o painel web de configuração chega na Fase 3 ([#20](https://github.com/Dollynski/Project-Cubot/issues/20)).
+> **Em refatoração** ([#14](https://github.com/Dollynski/Project-Cubot/issues/14)). O Cubô já funciona por **voz** e em **modo texto**. O painel web de configuração chega na Fase 3 ([#20](https://github.com/Dollynski/Project-Cubot/issues/20)); por enquanto a configuração é feita pelo `config.toml`.
 
 ## O que ele faz
 
+- Fica esperando a palavra de ativação ("hey jarvis"), escuta o pedido, responde falando e volta a esperar. Tudo na sua máquina, exceto a conversa com o provedor de IA escolhido.
 - Conversa em português com o provedor de IA que você escolher: Gemini, Claude, OpenAI ou Ollama (local).
 - Controla e consulta dispositivos do Home Assistant (luzes, tomadas, sensores) e só confirma uma ação depois de ver o estado mudar.
 
 ## Requisitos
 
 - Linux (x86_64 ou ARM64) com Python 3.11 ou mais novo.
+- Para usar por voz: microfone, alto-falante e a biblioteca PortAudio (`sudo apt install libportaudio2`).
+- Cerca de 300 MB livres para os modelos de voz.
 - Uma chave de API do provedor escolhido. Com o Ollama não precisa.
 - Opcional: Home Assistant na sua rede, para controlar a casa.
 
@@ -25,7 +28,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Para desenvolver, instale com `pip install -e ".[dev]"` e rode `ruff check .` e `pytest`.
+Em seguida, baixe os modelos de voz (veja [Voz](#voz)). Para desenvolver, instale com `pip install -e ".[dev]"` e rode `ruff check .` e `pytest`.
 
 ## Configuração
 
@@ -95,13 +98,55 @@ docker run -d --name homeassistant --restart unless-stopped -p 8123:8123 -v "$HO
 
 Depois de alguns minutos, abra `http://localhost:8123` e crie a conta de administrador.
 
+## Voz
+
+Os modelos de voz são baixados uma vez, para `~/.local/share/cubo/` (ou a pasta de `CUBO_DATA_DIR`):
+
+```bash
+cubo preparar
+```
+
+Isso baixa a palavra de ativação (conferida por SHA-256), a voz [Piper](https://github.com/OHF-voice/piper1-gpl) e o modelo de transcrição Whisper. Depois disso o Cubô não precisa de internet para ouvir e falar; só para falar com o provedor de IA.
+
+Para escolher o microfone e o alto-falante, liste os dispositivos:
+
+```bash
+cubo audio
+```
+
+e ponha parte do nome (como `"USB"`) no `config.toml`. Prefira o nome ao número: os números mudam quando um dispositivo é ligado ou desligado. Vazio usa o padrão do sistema. Todos os campos são opcionais:
+
+```toml
+[voice]
+input_device = "USB"            # microfone
+output_device = ""              # alto-falante
+wake_word = "hey_jarvis"        # ou hey_livekit, ou o caminho de um .onnx treinado por você
+wake_word_threshold = 0.5       # menor ativa mais fácil, maior evita ativações falsas
+silence_seconds = 0.8           # silêncio que encerra o pedido
+max_listening_seconds = 15      # duração máxima de um pedido
+whisper_model = "base"          # tiny, base, small... (maior = mais preciso e mais lento)
+whisper_compute_type = "int8"
+piper_voice = "pt_BR-faber-medium"
+speech_speed = 1.0              # de 0,5 a 2
+```
+
+Sem a voz do Piper, o Cubô usa o `espeak-ng` (`sudo apt install espeak-ng`), se estiver instalado, com um aviso.
+
 ## Uso
+
+```bash
+cubo
+```
+
+O Cubô fica ouvindo: diga "hey jarvis", espere o bipe e faça o pedido. `Ctrl+C` sai.
+
+Para conversar digitando, sem áudio:
 
 ```bash
 cubo texto
 ```
 
-Converse digitando; `Ctrl+D` sai. Com `cubo -v texto` aparecem os logs detalhados, sempre com as chaves mascaradas.
+`Ctrl+D` sai. Com `cubo -v` ou `cubo -v texto` aparecem os logs detalhados, sempre com as chaves mascaradas.
 
 Exemplos: "liga a luz da sala com 30% de brilho", "qual a temperatura do quarto?", "canta uma música".
 

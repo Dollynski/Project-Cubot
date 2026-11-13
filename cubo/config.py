@@ -67,9 +67,25 @@ class HomeAssistantSettings(BaseModel):
         return devices
 
 
+class VoiceSettings(BaseModel):
+    # Vazio usa o dispositivo padrão do sistema; aceita o número ou parte do nome (`cubo audio`).
+    input_device: str = ""
+    output_device: str = ""
+    # Modelo pronto (hey_jarvis, hey_livekit) ou caminho de um .onnx treinado.
+    wake_word: str = "hey_jarvis"
+    wake_word_threshold: float = Field(default=0.5, gt=0, lt=1)
+    silence_seconds: float = Field(default=0.8, gt=0)
+    max_listening_seconds: float = Field(default=15, gt=0)
+    whisper_model: str = "base"
+    whisper_compute_type: str = "int8"
+    piper_voice: str = "pt_BR-faber-medium"
+    speech_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
 class Config(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     home_assistant: HomeAssistantSettings = Field(default_factory=HomeAssistantSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
 
 
 def default_config_dir() -> Path:

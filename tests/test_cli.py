@@ -1,13 +1,19 @@
 import stat
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import cubo.__main__ as cli
 from cubo.assistant import Assistant
 from cubo.bootstrap import Runtime
 from cubo.config import default_config_dir, load_config
 from cubo.credentials import CredentialStore
+from cubo.errors import SetupError
 from cubo.llm.memory import ConversationMemory
 from cubo.tools.registry import ToolRegistry
+from cubo.voice.builder import VoiceRuntime
+from cubo.voice.events import Heard, Replied
+from cubo.voice.models import DownloadError
 from tests.test_assistant import FakeProvider
 
 
@@ -77,3 +83,112 @@ def test_text_mode_conversation(monkeypatch, capsys):
     assert cli.main(["texto"]) == 0
 
     assert "cubô> Olá, tudo certo!" in capsys.readouterr().out
+
+
+def test_voice_is_the_default_mode(monkeypatch):
+    monkeypatch.setattr(cli, "_run_voice_mode", lambda *_: 7)
+
+    assert cli.main([]) == 7
+
+
+def test_voice_mode_without_models_points_to_prepare(monkeypatch, capsys):
+    assistant = Assistant(
+        provider=FakeProvider(text="oi"),
+        tools=ToolRegistry(),
+        memory=ConversationMemory(max_exchanges=5, idle_timeout_seconds=600),
+        system_prompt="",
+    )
+    monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
+
+    assert cli.main([]) == 2
+
+    assert "cubo preparar" in capsys.readouterr().err
+
+
+def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
+    class FakeLoop:
+        def run(self, _stop):
+            self.on_event(Heard("que horas são"))
+            self.on_event(Replied("São três da tarde."))
+
+    loop = FakeLoop()
+
+    def fake_build_voice(_settings, _assistant, _data_dir, on_event):
+        loop.on_event = on_event
+        return VoiceRuntime(loop=loop, microphone=nullcontext(), warnings=["voz reserva"])
+
+    assistant = Assistant(
+        provider=FakeProvider(text="oi"),
+        tools=ToolRegistry(),
+        memory=ConversationMemory(max_exchanges=5, idle_timeout_seconds=600),
+        system_prompt="",
+    )
+    monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
+    monkeypatch.setattr("cubo.voice.builder.build_voice", fake_build_voice)
+
+    assert cli.main([]) == 0
+
+    output = capsys.readouterr().out
+    assert "Aviso: voz reserva" in output
+    assert "você> que horas são" in output
+    assert "cubô> São três da tarde." in output
+
+
+def test_prepare_downloads_what_the_config_asks_for(monkeypatch, capsys):
+    downloads = []
+    monkeypatch.setattr(
+        cli, "download_wake_word", lambda name, data_dir, _http: downloads.append(("wake", name))
+    )
+    monkeypatch.setattr(
+        cli, "download_piper_voice", lambda voice, data_dir: downloads.append(("voz", voice))
+    )
+    monkeypatch.setattr(
+        cli, "download_whisper", lambda model, data_dir: downloads.append(("whisper", model))
+    )
+
+    assert cli.main(["preparar"]) == 0
+
+    assert downloads == [
+        ("wake", "hey_jarvis"),
+        ("voz", "pt_BR-faber-medium"),
+        ("whisper", "base"),
+    ]
+    assert "Tudo pronto" in capsys.readouterr().out
+
+
+def test_prepare_reports_a_failed_download(monkeypatch, capsys):
+    def offline(*_args):
+        raise DownloadError("sem rede")
+
+    monkeypatch.setattr(cli, "download_wake_word", offline)
+
+    assert cli.main(["preparar"]) == 1
+
+    assert "sem rede" in capsys.readouterr().err
+
+
+def test_audio_lists_the_devices(monkeypatch, capsys):
+    devices = [
+        SimpleNamespace(index=0, name="Microfone USB", inputs=1, outputs=0),
+        SimpleNamespace(index=1, name="Placa de som", inputs=2, outputs=2),
+    ]
+    monkeypatch.setattr(cli, "load_devices", lambda: SimpleNamespace(list_devices=lambda: devices))
+
+    assert cli.main(["audio"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Microfone USB (entrada)" in output
+    assert "Placa de som (entrada, saída)" in output
+    assert "config.toml" in output
+    assert "os números mudam" in output
+
+
+def test_audio_without_portaudio_explains(monkeypatch, capsys):
+    def missing():
+        raise SetupError("Falta a biblioteca PortAudio.")
+
+    monkeypatch.setattr(cli, "load_devices", missing)
+
+    assert cli.main(["audio"]) == 2
+
+    assert "PortAudio" in capsys.readouterr().err

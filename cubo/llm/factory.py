@@ -2,6 +2,7 @@
 
 from cubo.config import LLMSettings, ProviderName
 from cubo.credentials import ENV_VARS, CredentialName, CredentialStore
+from cubo.errors import SetupError
 from cubo.llm.base import ChatProvider
 
 DISPLAY_NAMES: dict[ProviderName, str] = {
@@ -13,10 +14,6 @@ DISPLAY_NAMES: dict[ProviderName, str] = {
 
 # O Ollama ignora a chave, mas o SDK da OpenAI exige uma.
 _OLLAMA_PLACEHOLDER_KEY = "ollama"
-
-
-class SetupError(Exception):
-    """Configuração incompleta. A mensagem diz ao usuário como corrigir."""
 
 
 def create_provider(settings: LLMSettings, credentials: CredentialStore) -> ChatProvider:

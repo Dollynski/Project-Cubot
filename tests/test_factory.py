@@ -2,7 +2,8 @@ import pytest
 
 from cubo.config import LLMSettings
 from cubo.credentials import CredentialStore
-from cubo.llm.factory import SetupError, create_provider
+from cubo.errors import SetupError
+from cubo.llm.factory import create_provider
 
 
 @pytest.fixture
