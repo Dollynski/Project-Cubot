@@ -1,169 +1,110 @@
-# 🤖 Projeto Cubô: Assistente de Voz Open Source (Python/Raspberry Pi) | PT-BR
+# Cubô
 
-O Cubô é um assistente de voz modular, de código aberto e baixo custo, projetado para rodar em hardware embarcado (como o Raspberry Pi, por exemplo). Ele utiliza uma arquitetura híbrida, processando o reconhecimento de fala localmente (whisper.cpp) e utilizando a API do Google Gemini para o processamento de linguagem natural (PLN) e interação com Smart Home (Home Assistant).
+Assistente de voz open source em português, integrado ao Home Assistant. Feito para rodar numa placa ARM64 (como uma Orange Pi) ou num PC Linux.
 
-Este guia detalha o processo de instalação e configuração para que o Cubô funcione em um ambiente de desenvolvimento (Windows/Linux).
+> **Em refatoração** ([#14](https://github.com/Dollynski/Project-Cubot/issues/14)). Por enquanto o Cubô funciona em **modo texto**. O pipeline de voz volta na Fase 2 ([#19](https://github.com/Dollynski/Project-Cubot/issues/19)) e o painel web de configuração chega na Fase 3 ([#20](https://github.com/Dollynski/Project-Cubot/issues/20)).
 
-# ⚠️ Pré-requisitos do Sistema
+## O que ele faz
 
-Para rodar o Cubô, você precisa das seguintes ferramentas instaladas no seu ambiente:
+- Conversa em português com o provedor de IA que você escolher: Gemini, Claude, OpenAI ou Ollama (local).
+- Controla e consulta dispositivos do Home Assistant (luzes, tomadas, sensores) e só confirma uma ação depois de ver o estado mudar.
 
-- Python 3.9+
-- Git
-- Ambiente de Compilação C/C++ (Necessário para o whisper.cpp e espeak-ng):
-- Windows: MSYS2 (recomendado) ou Visual Studio com ferramentas de desenvolvimento Desktop C++.
-- Linux/Raspberry Pi: build-essential e cmake.
-- Espeak-NG (Motor de TTS):
-- Windows: Instale via winget install espeak-ng (ou instalador oficial).
-- Linux/Raspberry Pi: sudo apt-get install espeak-ng.
-- Home Assistant (Servidor): Rodando na sua rede local (via Docker, VM ou instalação dedicada).
+## Requisitos
 
-# ⚙️ 1. Configuração do Ambiente Python
+- Linux (x86_64 ou ARM64) com Python 3.11 ou mais novo.
+- Uma chave de API do provedor escolhido. Com o Ollama não precisa.
+- Opcional: Home Assistant na sua rede, para controlar a casa.
 
-## 1.1. Clone o projeto
-`git clone https://github.com/Dollynski/Project-Cubot`
-`cd projeto-cubo`
+## Instalação
 
-## 1.2. Crie e ative um ambiente virtual (Recomendado)
-`python -m venv venv`
+```bash
+git clone https://github.com/Dollynski/Project-Cubot.git
+cd Project-Cubot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
-No Windows:
-`.\venv\Scripts\activate`
+Para desenvolver, instale com `pip install -e ".[dev]"` e rode `ruff check .` e `pytest`.
 
-No Linux/macOS:
-`source venv/bin/activate`
+## Configuração
 
-## 1.3. Instale as dependências
-`pip install -e .`
+Os arquivos ficam em `~/.config/cubo/` (ou na pasta indicada por `CUBO_CONFIG_DIR`):
 
-Para desenvolver (lint e testes): `pip install -e ".[dev]"`
+- `config.toml`: provedor, modelo, personalidade, Home Assistant e dispositivos. Escreva só o que quiser mudar; o resto usa o padrão.
+- `secrets.toml`: chaves e tokens, com permissão de leitura só para o dono do arquivo.
 
+Se houver um `.env` do protótipo antigo na pasta onde você rodar o Cubô pela primeira vez, a chave do Gemini, o token e o endereço do Home Assistant são importados automaticamente.
 
-# 1.4. Instalação do whisper.cpp (Speech-to-Text Local)
+### Chave da IA
 
-O Cubô utiliza o whisper.cpp para transcrição local de alta performance.
+```bash
+cubo chave gemini
+```
 
-## 1.5. Obter o Código: Clone o repositório do whisper.cpp na sua pasta de usuário (~ ou C:\Users\SeuUsuario):
+Troque `gemini` por `claude` ou `openai` conforme o provedor. A chave é pedida sem aparecer na tela. As variáveis `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` e `OPENAI_API_KEY` também funcionam e têm prioridade sobre o arquivo.
 
-`cd ~
-git clone [https://github.com/ggerganov/whisper.cpp.git](https://github.com/ggerganov/whisper.cpp.git)
-cd whisper.cpp`
+### Provedor e modelo
 
+```toml
+[llm]
+provider = "claude"  # gemini, claude, openai ou ollama
 
-## 1.6. Baixar Modelo: Baixe o modelo base (usado no projeto) e o executável de download.
+[llm.models]
+gemini = "gemini-3.5-flash"
+claude = "claude-opus-5-5"
+openai = ""          # preencha com o modelo que quiser usar
+ollama = "llama3.2"  # um modelo já baixado no Ollama
+```
 
-`bash ./models/download-ggml-model.sh base`
+Para o Ollama, o endereço padrão é `http://localhost:11434/v1`; outro endereço vai em `llm.ollama_url`.
 
-Nota: No Windows, use o terminal Git Bash para executar o comando acima.
+### Home Assistant
 
-## 1.7. Compilar: Compile o executável.
+1. No Home Assistant, abra seu perfil, vá em **Segurança** e crie um **token de acesso de longa duração**.
+2. Salve o token:
 
-`make`
+   ```bash
+   cubo chave home_assistant
+   ```
 
-Nota: Se 'make' não funcionar, tente 'mingw32-make'
+3. No `config.toml`, informe o endereço e os dispositivos, cada um com o nome pelo qual você vai chamá-lo:
 
-O executável whisper-cli (ou whisper-cli.exe) será criado em ~/whisper.cpp/build/bin.
+   ```toml
+   [home_assistant]
+   url = "http://192.168.0.10:8123"
 
-## 1.8. Verificar Caminho: O arquivo integracoes/audio.py está configurado para procurar o executável em ~/whisper.cpp/build/bin. Certifique-se de que o executável está lá.
+   [[home_assistant.devices]]
+   entity_id = "light.sala"
+   alias = "luz da sala"
 
-# 💻 2. Configuração do Servidor Home Assistant (Docker)
+   [[home_assistant.devices]]
+   entity_id = "sensor.temperatura_quarto"
+   alias = "temperatura do quarto"
+   ```
 
-Esta secção detalhe como instalar a biblioteca Home Assistant (HA) como servidor central de automação no seu ambiente de desenvolvimento.
+O ID de cada entidade aparece no Home Assistant em **Ferramentas de desenvolvedor → Estados**. Luzes (`light`), tomadas (`switch`), interruptores virtuais (`input_boolean`) e ventiladores (`fan`) podem ser ligados e desligados; qualquer entidade pode ser consultada.
 
-## 2.1 . Instalação do Docker Engine
-- Windows/ macOS: Instale o [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- Linux (Debian/Ubuntu): Siga os comandos de instalação do Docker engine.
-  
-  `sudo apt-get update
-  sudo apt get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  sudo usermod -aG docker $USER`
+Para testar sem dispositivos reais, crie um auxiliar do tipo **Alternar** em **Configurações → Dispositivos e serviços → Auxiliares**; ele vira uma entidade `input_boolean`.
 
-## 2.2 Iniciar o Servidor HA
-Abra o terminal e execute o comando para baixar e rodar a imagem estável do Home Assistant na porta 8123:
+#### Home Assistant em Docker (opcional)
 
-`docker run-d --name homeassistant --restart unless-stopped -p 8123:8123 -v $HOME/homeassistant/config:/config homeassistant/home-assistant:stable`
+```bash
+docker run -d --name homeassistant --restart unless-stopped -p 8123:8123 -v "$HOME/homeassistant/config:/config" homeassistant/home-assistant:stable
+```
 
-Nota: Este comando funciona tanto no PowerShell quanto no Terminal Linux. 
+Depois de alguns minutos, abra `http://localhost:8123` e crie a conta de administrador.
 
-## 2.3 Acesso e Configuração
-- Acesso Inicial: Após 2-5 minutos, acesse ao HA no seu navegador: `http://localhost:8123`
-- Criação de Conta: Crie sua conta de administrador local.
+## Uso
 
-# 🔑 3. Configuração das Credenciais (APIs)
+```bash
+cubo texto
+```
 
-O Cubô precisa de chaves de acesso da sua LLM de preferência. O uso do Google Gemini é o recomendado, mas não é um requerimento para este projeto. Por fim, também será necessário obter chaves de acesso da API Home Assistant.
+Converse digitando; `Ctrl+D` sai. Com `cubo -v texto` aparecem os logs detalhados, sempre com as chaves mascaradas.
 
-## 3.1. Criar o Arquivo .env
+Exemplos: "liga a luz da sala com 30% de brilho", "qual a temperatura do quarto?", "canta uma música".
 
-Crie um arquivo chamado .env na pasta raiz do projeto com as seguintes variáveis:
+## Licença
 
-`# --- 1. GOOGLE GEMINI ---`
-`# Obtido em Google AI Studio ou Google Cloud`
-`GEMINI_API_KEY="SUA_CHAVE_API_GEMINI_AQUI"`
-
-`# --- 2. CONFIGURAÇÕES DO HOME ASSISTANT ---`
-`# - URL: O endereço IP da sua instância do Home Assistant (HA)`
-`# Ex: [http://192.168.1.10:8123](http://192.168.1.10:8123) (Se estiver rodando em outra máquina)`
-`# Ex: http://localhost:8123 (Se estiver rodando em Docker no mesmo PC)`
-`HOME_ASSISTANT_URL="http://localhost:8123"`
-`# - TOKEN: O token de acesso de longa duração do Home Assistant`
-`HOME_ASSISTANT_TOKEN="SEU_TOKEN_LONGO_HA_AQUI"`
-
-`# --- 3. CONFIGURAÇÃO DE ÁUDIO ---`
-`# Índice do microfone (0, 1, 2...). Use 'python -m sounddevice' para listar.`
-`MIC_DEVICE_INDEX=1 `
-
-## 3.2. Obter o Token do Home Assistant (HA)
-
-Abra a interface web do Home Assistant.
-
-Clique no ícone do seu Perfil (canto inferior esquerdo).
-
-Role até a seção "Tokens de Acesso de Longa Duração" (Long-Lived Access Tokens).
-
-Clique em + CRIAR TOKEN, dê um nome (ex: Cubot_API), e COPIE a chave longa gerada e cole-a no seu .env.
-
-# 💡 4. Configuração da Smart Home 
-
-Nesta etapa, será configurada a função de uma lâmpada smart e da chamada para obter a temperatura atual. Use esse passo a passo de exemplo para adicionar novas funcionalidades conforme achar necessário.
-
-## 4.1. Entidade de Controle (Lâmpada)
-
-Para controlar uma lâmpada física, você deve primeiro adicioná-la ao Home Assistant através de sua respectiva integração.
-
-- No HA, vá para Configurações -> Dispositivos e Serviços
-- Clique em + Adicionar Integração. Procure a marca do seu dispositivo (Ex: Tuya, Philips Hue, IKEA, MQTT, etc).
-- Siga o processo do dashboard para vincular sua conta de nuvem ou rede local.
-- O HA irá criar a entidade real (Ex: light.luz_da_sala).
-- Vá para Ferramentas de Desenvolvedor -> Estados e localize a entidade que o HA criou para sua lâmpada (Ex: light.minha_luz_de_verdade).
-- Você deve garantir que a constante ENTIDADE_LAMPADA no seu código Python use o ID real e completo dessa entidade (Ex: ENTIDADE_LAMPADA = "light.minha_luz_de_verdade")
-
-## 4.2. Entidade de Leitura (Temperatura)
-
-O Cubô lê a temperatura a partir do sensor de clima padrão já incluso no Home Assistant. Para garantir que o assistente tem acesso ao sensor, você deve:
-
-- Verifique a entidade: Certifique-se de que a entidade `weather.forecast_home` está ativa e visível no seu HA (Geralmente é ativada ao configurar sua localização.)
-
-# ▶️ 5. Como Executar o Cubô
-
-Com as dependências instaladas e o .env configurado:
-
-Abra o Terminal/PowerShell.
-
-Ative o ambiente virtual (.\venv\Scripts\activate).
-
-Execute o arquivo principal:
-
-`python main.py`
-
-Nota: O Cubô está configurado para ter seu programa encerrado sempre que o usuário disser o comando `"Desligar"`.
-
-O Cubô irá iniciar o diagnóstico de conexão HA e, em seguida, começar a ouvir.
-
-Tente conversar com ele, dê boa tarde ou peça para cantar uma música. 
-
-Também é possível testar os comandos programados, como um pedido para acender ou apagar a luz. 
-
-Lembre-se de que quaisquer outras interações fora as duas iniciais dependem do usuário modificar o código com seus próprios periféricos inteligentes. 
-
-Divirta-se com o Cubô! 
+GPL-3.0. Veja o arquivo [LICENSE](LICENSE).
