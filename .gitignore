@@ -1,5 +1,6 @@
 # Ambiente virtual
 venv/
+.venv/
 .env
 .env.*
 
@@ -9,6 +10,11 @@ __pycache__/
 *.pyo
 *.pyd
 *.pyc
+
+# Ferramentas e empacotamento
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
 
 # Banco de dados local 
 *.db
@@ -40,3 +46,6 @@ build/
 *.png
 *.svg
 *.pdf
+
+# Padrões locais do mantenedor
+PADROES.md
