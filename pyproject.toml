@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cubo"
+version = "0.1.0"
+description = "Assistente de voz open source em português, integrado ao Home Assistant."
+readme = "README.md"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "google-generativeai",
+    "python-dotenv",
+    "sounddevice",
+    "scipy",
+    "numpy",
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools]
+packages = ["integracoes"]
+py-modules = ["main"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Legacy prototype, replaced by the `cubo` package in the refactor.
+# Not worth reformatting code that is about to be removed.
+extend-exclude = ["main.py", "integracoes"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
