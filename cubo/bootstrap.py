@@ -10,6 +10,7 @@ from cubo.llm.memory import ConversationMemory
 from cubo.llm.prompts import build_system_prompt
 from cubo.tools.home_assistant import HomeAssistantClient, HomeAssistantTools
 from cubo.tools.registry import Tool, ToolRegistry
+from cubo.usage import UsageTracker
 
 
 @dataclass
@@ -23,7 +24,9 @@ class Runtime:
             self.home_assistant.close()
 
 
-def build_runtime(config: Config, credentials: CredentialStore) -> Runtime:
+def build_runtime(
+    config: Config, credentials: CredentialStore, usage: UsageTracker | None = None
+) -> Runtime:
     """Cria o assistente. Levanta ``SetupError`` se faltar algo essencial, como a chave da IA."""
     provider = create_provider(config.llm, credentials)
 
@@ -52,5 +55,6 @@ def build_runtime(config: Config, credentials: CredentialStore) -> Runtime:
         tools=ToolRegistry(tools),
         memory=memory,
         system_prompt=build_system_prompt(config.llm.personality, devices),
+        usage=usage,
     )
     return Runtime(assistant=assistant, home_assistant=client, warnings=warnings)

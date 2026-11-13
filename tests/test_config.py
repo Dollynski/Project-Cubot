@@ -5,6 +5,7 @@ from cubo.config import (
     Config,
     Device,
     HomeAssistantSettings,
+    PanelSettings,
     VoiceSettings,
     load_config,
     save_config,
@@ -111,3 +112,25 @@ def test_migration_skips_empty_values(tmp_path):
     assert config.voice.input_device == ""
     assert "chave do Gemini" not in imported
     assert "microfone" not in imported
+
+
+def test_panel_listens_only_on_this_device_by_default():
+    panel = PanelSettings()
+
+    assert (panel.host, panel.port, panel.https) == ("127.0.0.1", 8080, False)
+    assert PanelSettings(listen="network").host == "0.0.0.0"
+
+
+def test_panel_certificate_and_key_come_together():
+    with pytest.raises(ValidationError, match="juntos"):
+        PanelSettings(ssl_certfile="cert.pem")
+    with pytest.raises(ValidationError, match="juntos"):
+        PanelSettings(ssl_keyfile="chave.pem")
+
+    assert PanelSettings(ssl_certfile="cert.pem", ssl_keyfile="chave.pem").https
+
+
+def test_call_limits_have_safe_defaults():
+    config = Config()
+
+    assert (config.llm.max_calls_per_minute, config.llm.max_calls_per_day) == (20, 500)
