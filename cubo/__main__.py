@@ -19,6 +19,7 @@ from cubo.errors import SetupError
 from cubo.logs import configure_logging
 from cubo.migration import migrate_legacy_env
 from cubo.tools.home_assistant import HomeAssistantError
+from cubo.usage import USAGE_FILE_NAME, UsageTracker
 from cubo.voice import load_devices
 from cubo.voice.events import Event, Heard, Replied, StateChanged
 from cubo.voice.models import DownloadError, default_data_dir, prepare_models
@@ -42,12 +43,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cubo", description="Assistente de voz Cubô.")
     parser.add_argument("-v", "--verbose", action="store_true", help="mostra logs detalhados")
+    parser.add_argument(
+        "--sem-painel", action="store_true", help="não abre o painel web (só a voz)"
+    )
     # Sem comando, o Cubô liga o microfone e fica esperando a wake word.
     parser.set_defaults(run=_run_voice_mode)
     commands = parser.add_subparsers(dest="command", title="comandos")
 
     text = commands.add_parser("texto", help="conversa com o Cubô digitando, sem áudio")
     text.set_defaults(run=_run_text_mode)
+
+    panel = commands.add_parser("painel", help="abre só o painel, sem ligar o microfone")
+    panel.set_defaults(run=_run_panel_only)
 
     prepare = commands.add_parser(
         "preparar", help="baixa os modelos de voz (wake word, transcrição e voz)"
@@ -65,31 +72,82 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_voice_mode(
-    _args: argparse.Namespace, config_dir: Path, credentials: CredentialStore
+    args: argparse.Namespace, config_dir: Path, credentials: CredentialStore
 ) -> int:
-    opened = _open_runtime(config_dir, credentials)
-    if opened is None:
-        return 2
-    config, runtime = opened
-    voice = None
-    try:
-        # Importado aqui: carrega os modelos de áudio, que o modo texto não usa.
-        from cubo.voice.session import VoiceSession
+    return _run_service(args, config_dir, credentials, voice=True)
 
-        voice = VoiceSession(config.voice, runtime.assistant, default_data_dir(), _show_event)
-        for warning in voice.warnings:
-            print(f"Aviso: {warning}")
-        voice.start()
-        print(f"Cubô ouvindo. Diga '{config.voice.wake_word}'; Ctrl+C para sair.")
-        _wait_until_interrupted()
-    except SetupError as error:
+
+def _run_panel_only(
+    args: argparse.Namespace, config_dir: Path, credentials: CredentialStore
+) -> int:
+    return _run_service(args, config_dir, credentials, voice=False)
+
+
+def _run_service(
+    args: argparse.Namespace, config_dir: Path, credentials: CredentialStore, *, voice: bool
+) -> int:
+    """Liga o Cubô: a IA, a voz (se ``voice``) e o painel (a menos que ``--sem-painel``)."""
+    try:
+        config = _load_or_migrate_config(config_dir, credentials)
+    except (ValidationError, tomllib.TOMLDecodeError) as error:
         print(f"Erro de configuração: {error}", file=sys.stderr)
         return 2
+
+    # Importados aqui: carregam os modelos de áudio, que os modos de texto e de chave não usam.
+    from cubo.service import CuboService
+    from cubo.voice.session import VoiceSession
+
+    data_dir = default_data_dir()
+    service = CuboService(
+        config=config,
+        config_path=config_dir / CONFIG_FILE_NAME,
+        credentials=credentials,
+        data_dir=data_dir,
+        usage=UsageTracker(data_dir / USAGE_FILE_NAME),
+        voice_factory=VoiceSession if voice else None,
+        on_event=_show_event,
+    )
+    service.start()
+    _print_status(service)
+    try:
+        if args.sem_painel:
+            if service.voice is None:
+                reason = service.problems.get("voz", "nem o painel nem a voz foram ligados")
+                print(f"Erro: {reason}", file=sys.stderr)
+                return 2
+            print(f"Cubô ouvindo. Diga '{config.voice.wake_word}'; Ctrl+C para sair.")
+            _wait_until_interrupted()
+        else:
+            _run_panel(service, config_dir)
     finally:
-        if voice is not None:
-            voice.stop()
-        runtime.close()
+        service.stop()
     return 0
+
+
+def _print_status(service) -> None:
+    for message in service.problems.values():
+        print(f"Aviso: {message}")
+    for warning in service.warnings:
+        print(f"Aviso: {warning}")
+    runtime = service.runtime
+    if runtime is not None and runtime.home_assistant is not None:
+        try:
+            runtime.home_assistant.check_connection()
+        except HomeAssistantError as error:
+            print(f"Aviso: {error}")
+
+
+def _run_panel(service, config_dir: Path) -> None:
+    from cubo.web.app import panel_urls, run_panel
+    from cubo.web.auth import AUTH_FILE_NAME, LoginThrottle, PanelAuth
+    from cubo.web.panel import Panel
+
+    settings = service.config.panel
+    auth = PanelAuth(config_dir / AUTH_FILE_NAME)
+    print("Painel: " + " ou ".join(panel_urls(settings)))
+    if auth.setup_code:
+        print(f"Primeiro acesso: o painel vai pedir o código {auth.setup_code}.")
+    run_panel(Panel(service, auth, LoginThrottle()), settings, config_dir / "nicegui")
 
 
 def _wait_until_interrupted() -> None:

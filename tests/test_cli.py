@@ -90,52 +90,80 @@ def test_voice_is_the_default_mode(monkeypatch):
     assert cli.main([]) == 7
 
 
-def test_voice_mode_without_models_points_to_prepare(monkeypatch, capsys):
-    assistant = Assistant(
-        provider=FakeProvider(text="oi"),
-        tools=ToolRegistry(),
-        memory=ConversationMemory(max_exchanges=5, idle_timeout_seconds=600),
-        system_prompt="",
-    )
-    monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
+class FakeSession:
+    """Sessão de voz falsa, que fala assim que é ligada."""
 
-    assert cli.main([]) == 2
+    warnings = ["voz reserva"]
+    stopped = False
+
+    def __init__(self, _settings, _assistant, _data_dir, on_event):
+        self.on_event = on_event
+        self.error = None
+        self.running = True
+
+    def start(self):
+        self.on_event(Heard("que horas são"))
+        self.on_event(Replied("São três da tarde."))
+
+    def stop(self):
+        FakeSession.stopped = True
+
+
+def configure_gemini_key():
+    CredentialStore(secrets_file(), environ={}).set("gemini", "AIza-teste-1234")
+
+
+def test_voice_without_models_points_to_prepare(capsys):
+    configure_gemini_key()
+
+    assert cli.main(["--sem-painel"]) == 2
 
     assert "cubo preparar" in capsys.readouterr().err
 
 
-def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
-    class FakeSession:
-        warnings = ["voz reserva"]
-        stopped = False
-
-        def __init__(self, _settings, _assistant, _data_dir, on_event):
-            self.on_event = on_event
-
-        def start(self):
-            self.on_event(Heard("que horas são"))
-            self.on_event(Replied("São três da tarde."))
-
-        def stop(self):
-            FakeSession.stopped = True
-
-    assistant = Assistant(
-        provider=FakeProvider(text="oi"),
-        tools=ToolRegistry(),
-        memory=ConversationMemory(max_exchanges=5, idle_timeout_seconds=600),
-        system_prompt="",
-    )
-    monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
+def test_voice_without_panel_prints_the_conversation(monkeypatch, capsys):
+    configure_gemini_key()
+    FakeSession.stopped = False
     monkeypatch.setattr("cubo.voice.session.VoiceSession", FakeSession)
     monkeypatch.setattr(cli, "_wait_until_interrupted", lambda: None)
 
-    assert cli.main([]) == 0
+    assert cli.main(["--sem-painel"]) == 0
 
     output = capsys.readouterr().out
     assert "Aviso: voz reserva" in output
     assert "você> que horas são" in output
     assert "cubô> São três da tarde." in output
     assert FakeSession.stopped
+
+
+def test_default_mode_runs_voice_and_the_panel(monkeypatch):
+    configure_gemini_key()
+    FakeSession.stopped = False
+    monkeypatch.setattr("cubo.voice.session.VoiceSession", FakeSession)
+    shown = []
+    monkeypatch.setattr(cli, "_run_panel", lambda service, config_dir: shown.append(service))
+
+    assert cli.main([]) == 0
+
+    assert shown[0].voice_enabled
+    assert shown[0].voice is not None
+    assert FakeSession.stopped
+
+
+def test_panel_command_runs_without_voice(monkeypatch):
+    shown = []
+    monkeypatch.setattr(cli, "_run_panel", lambda service, config_dir: shown.append(service))
+
+    assert cli.main(["painel"]) == 0
+
+    assert not shown[0].voice_enabled
+    assert "ia" in shown[0].problems
+
+
+def test_nothing_to_run_without_voice_and_without_panel(capsys):
+    assert cli.main(["--sem-painel", "painel"]) == 2
+
+    assert "Erro" in capsys.readouterr().err
 
 
 def test_prepare_downloads_what_the_config_asks_for(monkeypatch, capsys):

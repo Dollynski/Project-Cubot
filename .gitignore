@@ -49,3 +49,6 @@ build/
 
 # Padrões locais do mantenedor
 PADROES.md
+
+# Dados de sessão do painel (NiceGUI)
+.nicegui/
