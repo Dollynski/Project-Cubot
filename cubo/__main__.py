@@ -23,6 +23,7 @@ from cubo.usage import USAGE_FILE_NAME, UsageTracker
 from cubo.voice import load_devices
 from cubo.voice.events import Event, Heard, Replied, StateChanged
 from cubo.voice.models import DownloadError, default_data_dir, prepare_models
+from cubo.web.auth import AUTH_FILE_NAME, PanelAuth
 
 # O protótipo antigo guardava a configuração num .env na pasta do projeto.
 LEGACY_ENV_PATH = Path(".env")
@@ -60,6 +61,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "preparar", help="baixa os modelos de voz (wake word, transcrição e voz)"
     )
     prepare.set_defaults(run=_run_prepare)
+
+    password = commands.add_parser("senha", help="redefine a senha do painel (esqueci a senha)")
+    password.add_argument(
+        "--redefinir",
+        action="store_true",
+        required=True,
+        help="apaga a senha atual; o próximo acesso ao painel define uma nova",
+    )
+    password.set_defaults(run=_run_password_command)
 
     audio = commands.add_parser("audio", help="lista os microfones e alto-falantes disponíveis")
     audio.set_defaults(run=_run_audio_list)
@@ -139,7 +149,7 @@ def _print_status(service) -> None:
 
 def _run_panel(service, config_dir: Path) -> None:
     from cubo.web.app import panel_urls, run_panel
-    from cubo.web.auth import AUTH_FILE_NAME, LoginThrottle, PanelAuth
+    from cubo.web.auth import LoginThrottle
     from cubo.web.panel import Panel
 
     settings = service.config.panel
@@ -247,6 +257,16 @@ def _run_audio_list(
         f"na seção [voice] de {config_dir / CONFIG_FILE_NAME}.\n"
         "Prefira o nome: os números mudam quando um dispositivo é ligado ou desligado."
     )
+    return 0
+
+
+def _run_password_command(
+    _args: argparse.Namespace, config_dir: Path, _credentials: CredentialStore
+) -> int:
+    if PanelAuth(config_dir / AUTH_FILE_NAME).clear_password():
+        print("Senha do painel apagada. Ao abrir o painel de novo, defina outra com o código.")
+    else:
+        print("O painel ainda não tem senha.")
     return 0
 
 

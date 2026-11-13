@@ -2,6 +2,8 @@ import stat
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import cubo.__main__ as cli
 from cubo.assistant import Assistant
 from cubo.bootstrap import Runtime
@@ -224,3 +226,26 @@ def test_audio_without_portaudio_explains(monkeypatch, capsys):
     assert cli.main(["audio"]) == 2
 
     assert "PortAudio" in capsys.readouterr().err
+
+
+def test_password_reset_erases_the_panel_password(capsys):
+    from cubo.web.auth import AUTH_FILE_NAME, PanelAuth
+
+    auth = PanelAuth(default_config_dir() / AUTH_FILE_NAME)
+    auth.set_password("senha-segura-123")
+
+    assert cli.main(["senha", "--redefinir"]) == 0
+
+    assert not auth.has_password
+    assert "apagada" in capsys.readouterr().out
+
+
+def test_password_reset_without_a_password_says_so(capsys):
+    assert cli.main(["senha", "--redefinir"]) == 0
+
+    assert "ainda não tem senha" in capsys.readouterr().out
+
+
+def test_password_command_needs_the_flag():
+    with pytest.raises(SystemExit):
+        cli.main(["senha"])
