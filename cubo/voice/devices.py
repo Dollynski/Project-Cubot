@@ -51,34 +51,49 @@ def _device_info(device: DeviceId, kind: str) -> dict:
 
 
 class Microphone:
-    """Entrega o áudio do microfone em quadros de 80 ms, a 16 kHz, mono."""
+    """Entrega o áudio do microfone em quadros de 80 ms, a 16 kHz, mono.
+
+    Pode ser aberto e fechado quantas vezes for preciso.
+    """
 
     def __init__(self, device: DeviceId) -> None:
+        self._device = device
         self._rate = int(_device_info(device, "input")["default_samplerate"])
         self._blocks: queue.Queue[np.ndarray] = queue.Queue()
         self._resampler = StreamResampler(self._rate)
         self._buffer = FrameBuffer()
+        self._stream: sd.InputStream | None = None
+
+    def open(self) -> None:
+        """Começa a capturar. Levanta ``SetupError`` se o dispositivo não abrir."""
+        if self._stream is not None:
+            return
         try:
-            self._stream = sd.InputStream(
-                device=device,
+            stream = sd.InputStream(
+                device=self._device,
                 channels=1,
                 samplerate=self._rate,
                 dtype="float32",
                 blocksize=int(self._rate * BLOCK_SECONDS),
                 callback=self._on_block,
             )
+            stream.start()
         except sd.PortAudioError as error:
             raise SetupError(f"Não consegui abrir o microfone: {error}") from error
+        self._stream = stream
+
+    def close(self) -> None:
+        if self._stream is not None:
+            self._stream.close()
+            self._stream = None
+        self.flush()
 
     def __enter__(self) -> "Microphone":
-        try:
-            self._stream.start()
-        except sd.PortAudioError as error:
-            raise SetupError(f"Não consegui iniciar o microfone: {error}") from error
+        self.open()
         return self
 
     def __exit__(self, *_exc_info: object) -> None:
-        self._stream.close()
+        self.close()
 
     def frames(self, stop: threading.Event) -> Iterator[np.ndarray]:
         while not stop.is_set():

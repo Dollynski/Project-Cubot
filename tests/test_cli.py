@@ -1,5 +1,4 @@
 import stat
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +10,6 @@ from cubo.credentials import CredentialStore
 from cubo.errors import SetupError
 from cubo.llm.memory import ConversationMemory
 from cubo.tools.registry import ToolRegistry
-from cubo.voice.builder import VoiceRuntime
 from cubo.voice.events import Heard, Replied
 from cubo.voice.models import DownloadError
 from tests.test_assistant import FakeProvider
@@ -106,16 +104,19 @@ def test_voice_mode_without_models_points_to_prepare(monkeypatch, capsys):
 
 
 def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
-    class FakeLoop:
-        def run(self, _stop):
+    class FakeSession:
+        warnings = ["voz reserva"]
+        stopped = False
+
+        def __init__(self, _settings, _assistant, _data_dir, on_event):
+            self.on_event = on_event
+
+        def start(self):
             self.on_event(Heard("que horas são"))
             self.on_event(Replied("São três da tarde."))
 
-    loop = FakeLoop()
-
-    def fake_build_voice(_settings, _assistant, _data_dir, on_event):
-        loop.on_event = on_event
-        return VoiceRuntime(loop=loop, microphone=nullcontext(), warnings=["voz reserva"])
+        def stop(self):
+            FakeSession.stopped = True
 
     assistant = Assistant(
         provider=FakeProvider(text="oi"),
@@ -124,7 +125,8 @@ def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
         system_prompt="",
     )
     monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
-    monkeypatch.setattr("cubo.voice.builder.build_voice", fake_build_voice)
+    monkeypatch.setattr("cubo.voice.session.VoiceSession", FakeSession)
+    monkeypatch.setattr(cli, "_wait_until_interrupted", lambda: None)
 
     assert cli.main([]) == 0
 
@@ -132,6 +134,7 @@ def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
     assert "Aviso: voz reserva" in output
     assert "você> que horas são" in output
     assert "cubô> São três da tarde." in output
+    assert FakeSession.stopped
 
 
 def test_prepare_downloads_what_the_config_asks_for(monkeypatch, capsys):

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from cubo.voice.events import Heard, Replied, State, StateChanged
 from cubo.voice.loop import VoiceLoop
@@ -156,3 +157,51 @@ def test_a_failed_request_does_not_stop_the_loop():
     assert assistant.heard == ["acende a luz", "acende a luz"]
     assert speaker.spoken == ["Pronto: acende a luz"]
     assert wake_word.resets == 2
+
+
+def test_parts_can_be_replaced_between_requests():
+    first, second = FakeAssistant(), FakeAssistant()
+    microphone = ScriptedMicrophone([WAKE, SPEECH, SPEECH])
+    loop = VoiceLoop(
+        microphone=microphone,
+        wake_word=FakeWakeWord(),
+        recorder=TwoFrameRecorder(),
+        transcriber=FakeTranscriber(),
+        assistant=first,
+        speaker=FakeSpeaker(),
+    )
+
+    loop.replace(assistant=second)
+    loop.run(stop=None)
+
+    assert first.heard == []
+    assert second.heard == ["acende a luz"]
+
+
+def test_unknown_parts_cannot_be_replaced():
+    loop = VoiceLoop(
+        microphone=ScriptedMicrophone([]),
+        wake_word=FakeWakeWord(),
+        recorder=TwoFrameRecorder(),
+        transcriber=FakeTranscriber(),
+        assistant=FakeAssistant(),
+        speaker=FakeSpeaker(),
+    )
+
+    with pytest.raises(ValueError, match="on_event"):
+        loop.replace(on_event=print)
+
+
+def test_measures_the_microphone_level():
+    loop = VoiceLoop(
+        microphone=ScriptedMicrophone([np.full(4, 0.5, np.float32)]),
+        wake_word=FakeWakeWord(),
+        recorder=TwoFrameRecorder(),
+        transcriber=FakeTranscriber(),
+        assistant=FakeAssistant(),
+        speaker=FakeSpeaker(),
+    )
+
+    loop.run(stop=None)
+
+    assert loop.mic_level == pytest.approx(0.5)

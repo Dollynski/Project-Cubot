@@ -80,24 +80,32 @@ def _run_voice_mode(
     if opened is None:
         return 2
     config, runtime = opened
+    voice = None
     try:
         # Importado aqui: carrega os modelos de áudio, que o modo texto não usa.
-        from cubo.voice.builder import build_voice
+        from cubo.voice.session import VoiceSession
 
-        voice = build_voice(config.voice, runtime.assistant, default_data_dir(), _show_event)
+        voice = VoiceSession(config.voice, runtime.assistant, default_data_dir(), _show_event)
         for warning in voice.warnings:
             print(f"Aviso: {warning}")
+        voice.start()
         print(f"Cubô ouvindo. Diga '{config.voice.wake_word}'; Ctrl+C para sair.")
-        with voice.microphone:
-            voice.loop.run(threading.Event())
+        _wait_until_interrupted()
     except SetupError as error:
         print(f"Erro de configuração: {error}", file=sys.stderr)
         return 2
-    except KeyboardInterrupt:
-        print()
     finally:
+        if voice is not None:
+            voice.stop()
         runtime.close()
     return 0
+
+
+def _wait_until_interrupted() -> None:
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        print()
 
 
 def _show_event(event: Event) -> None:

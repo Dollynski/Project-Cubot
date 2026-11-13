@@ -1,6 +1,5 @@
 import builtins
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -8,13 +7,11 @@ from cubo.config import VoiceSettings
 from cubo.errors import SetupError
 from cubo.voice import builder, load_devices
 from cubo.voice.builder import (
-    build_voice,
     load_synthesizer,
     load_transcriber,
     load_wake_word,
     parse_device,
 )
-from cubo.voice.listening import ListeningLimits
 from cubo.voice.models import piper_voice_path, wake_word_path
 
 
@@ -111,40 +108,6 @@ def test_no_voice_at_all_is_a_setup_error(tmp_path, monkeypatch):
 
     with pytest.raises(SetupError, match="cubo preparar"):
         load_synthesizer(VoiceSettings(), tmp_path, [])
-
-
-def test_build_voice_wires_the_devices_and_limits(tmp_path, monkeypatch):
-    opened = []
-    recorders = []
-
-    class FakeMicrophone:
-        def __init__(self, device):
-            opened.append(("microfone", device))
-
-    class FakePlayer:
-        def __init__(self, device):
-            opened.append(("alto-falante", device))
-
-    monkeypatch.setattr(builder, "load_wake_word", lambda *_: "wake")
-    monkeypatch.setattr(builder, "load_transcriber", lambda *_: "stt")
-    monkeypatch.setattr(builder, "load_synthesizer", lambda *_: "tts")
-    monkeypatch.setattr(builder, "SpeechDetector", lambda: "vad")
-    monkeypatch.setattr(
-        builder, "UtteranceRecorder", lambda detector, limits: recorders.append((detector, limits))
-    )
-    monkeypatch.setattr(
-        builder,
-        "load_devices",
-        lambda: SimpleNamespace(Microphone=FakeMicrophone, SoundDevicePlayer=FakePlayer),
-    )
-    settings = VoiceSettings(input_device="2", silence_seconds=1.2, max_listening_seconds=9)
-
-    runtime = build_voice(settings, assistant="assistente", data_dir=tmp_path)
-
-    assert opened == [("microfone", 2), ("alto-falante", None)]
-    assert recorders == [("vad", ListeningLimits(silence_seconds=1.2, max_seconds=9))]
-    assert isinstance(runtime.microphone, FakeMicrophone)
-    assert runtime.warnings == []
 
 
 def test_missing_portaudio_explains_how_to_install(monkeypatch):

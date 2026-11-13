@@ -1,31 +1,16 @@
-"""Monta o ciclo de voz a partir da configuração."""
+"""Carrega os modelos de voz, um a um, a partir da configuração."""
 
 import shutil
-from collections.abc import Callable
-from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from huggingface_hub.errors import LocalEntryNotFoundError
 
-from cubo.assistant import Assistant
 from cubo.config import VoiceSettings
 from cubo.errors import SetupError
-from cubo.voice import load_devices
-from cubo.voice.events import Event
-from cubo.voice.listening import ListeningLimits, SpeechDetector, UtteranceRecorder
-from cubo.voice.loop import Microphone, VoiceLoop
 from cubo.voice.models import WAKE_WORD_SHA256, piper_voice_path, wake_word_path, whisper_dir
 from cubo.voice.stt import Transcriber
-from cubo.voice.tts import EspeakSynthesizer, PiperSynthesizer, Speaker, Synthesizer
+from cubo.voice.tts import EspeakSynthesizer, PiperSynthesizer, Synthesizer
 from cubo.voice.wake_word import WakeWordDetector
-
-
-@dataclass
-class VoiceRuntime:
-    loop: VoiceLoop
-    microphone: AbstractContextManager[Microphone]  # precisa ser aberto com `with`
-    warnings: list[str] = field(default_factory=list)
 
 
 def parse_device(value: str) -> int | str | None:
@@ -34,37 +19,6 @@ def parse_device(value: str) -> int | str | None:
     if not value:
         return None
     return int(value) if value.isdigit() else value
-
-
-def build_voice(
-    settings: VoiceSettings,
-    assistant: Assistant,
-    data_dir: Path,
-    on_event: Callable[[Event], None] = lambda _event: None,
-) -> VoiceRuntime:
-    """Cria o ciclo de voz. Levanta ``SetupError`` se faltar modelo ou dispositivo de áudio."""
-    wake_word = load_wake_word(settings, data_dir)
-    transcriber = load_transcriber(settings, data_dir)
-    warnings: list[str] = []
-    synthesizer = load_synthesizer(settings, data_dir, warnings)
-
-    devices = load_devices()
-    microphone = devices.Microphone(parse_device(settings.input_device))
-    player = devices.SoundDevicePlayer(parse_device(settings.output_device))
-
-    limits = ListeningLimits(
-        silence_seconds=settings.silence_seconds, max_seconds=settings.max_listening_seconds
-    )
-    loop = VoiceLoop(
-        microphone=microphone,
-        wake_word=wake_word,
-        recorder=UtteranceRecorder(SpeechDetector(), limits),
-        transcriber=transcriber,
-        assistant=assistant,
-        speaker=Speaker(synthesizer, player),
-        on_event=on_event,
-    )
-    return VoiceRuntime(loop=loop, microphone=microphone, warnings=warnings)
 
 
 def load_wake_word(settings: VoiceSettings, data_dir: Path) -> WakeWordDetector:

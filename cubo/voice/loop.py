@@ -7,7 +7,6 @@ from typing import Protocol
 
 import numpy as np
 
-from cubo.assistant import Assistant
 from cubo.voice.events import Event, Heard, Replied, State, StateChanged
 from cubo.voice.listening import UtteranceRecorder
 from cubo.voice.stt import Transcriber
@@ -15,6 +14,18 @@ from cubo.voice.tts import Speaker
 from cubo.voice.wake_word import WakeWordDetector
 
 logger = logging.getLogger(__name__)
+
+# Peças que podem ser trocadas. Todas valem com o ciclo rodando, menos o microfone, que alimenta
+# o ciclo inteiro: ele só pode ser trocado com o ciclo parado.
+REPLACEABLE_PARTS = frozenset(
+    {"microphone", "wake_word", "recorder", "transcriber", "assistant", "speaker"}
+)
+
+
+class Replier(Protocol):
+    def reply(self, user_text: str) -> str:
+        """Responde ao que foi dito, já em texto pronto para falar."""
+        ...
 
 
 class Microphone(Protocol):
@@ -34,7 +45,7 @@ class VoiceLoop:
         wake_word: WakeWordDetector,
         recorder: UtteranceRecorder,
         transcriber: Transcriber,
-        assistant: Assistant,
+        assistant: Replier,
         speaker: Speaker,
         on_event: Callable[[Event], None] = lambda _event: None,
     ) -> None:
@@ -45,15 +56,29 @@ class VoiceLoop:
         self._assistant = assistant
         self._speaker = speaker
         self._on_event = on_event
+        self.mic_level = 0.0  # volume do último quadro (RMS), para o painel mostrar
+
+    def replace(self, **parts: object) -> None:
+        """Troca peças do ciclo. A troca vale a partir do próximo pedido (ou quadro de áudio)."""
+        unknown = parts.keys() - REPLACEABLE_PARTS
+        if unknown:
+            raise ValueError(f"peças que não podem ser trocadas: {', '.join(sorted(unknown))}")
+        for name, part in parts.items():
+            setattr(self, f"_{name}", part)
 
     def run(self, stop: threading.Event) -> None:
         """Atende pedidos até ``stop`` ser acionado."""
-        frames = self._microphone.frames(stop)
+        frames = self._measured(self._microphone.frames(stop))
         self._on_event(StateChanged(State.WAITING))
         for frame in frames:
             if self._wake_word.detected(frame):
                 self._attend(frames)
                 self._on_event(StateChanged(State.WAITING))
+
+    def _measured(self, frames: Iterator[np.ndarray]) -> Iterator[np.ndarray]:
+        for frame in frames:
+            self.mic_level = float(np.sqrt(np.mean(np.square(frame))))
+            yield frame
 
     def _attend(self, frames: Iterator[np.ndarray]) -> None:
         try:
