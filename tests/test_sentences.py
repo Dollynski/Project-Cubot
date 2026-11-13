@@ -74,6 +74,14 @@ def test_closing_quotes_stay_with_their_sentence():
     assert split(['Ele disse "vamos!" Depois saiu.']) == ['Ele disse "vamos!"', "Depois saiu."]
 
 
+def test_markdown_marks_stay_with_their_sentence():
+    assert split(["**Pronto!** Liguei a luz. _Mais_ algo."]) == [
+        "**Pronto!**",
+        "Liguei a luz.",
+        "_Mais_ algo.",
+    ]
+
+
 def test_pieces_without_words_are_dropped():
     assert split(["...", " ", "Oi!", " ... "]) == ["Oi!"]
 

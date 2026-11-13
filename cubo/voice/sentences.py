@@ -3,6 +3,10 @@
 # Títulos que levam ponto sem terminar a frase ("Dr. Silva").
 ABBREVIATIONS = frozenset({"sr", "sra", "srta", "dr", "dra", "prof", "profa", "av", "ex", "exa"})
 
+# O que pode vir colado depois da pontuação e ainda pertence à mesma frase: mais pontuação,
+# aspas, parênteses e os marcadores de negrito, itálico e código do Markdown.
+CLOSERS = "!?….\"')”*_`"
+
 # Sem pontuação por muito tempo, a frase é cortada numa vírgula para a fala não demorar.
 MAX_UNBROKEN_CHARS = 200
 SOFT_BREAKS = (", ", "; ", ": ")
@@ -53,7 +57,7 @@ def _find_end(text: str) -> int | None:
 
 def _after_run(text: str, index: int) -> int:
     """Pula pontuação repetida ("?!", "...") e aspas ou parênteses que fecham a frase."""
-    while index + 1 < len(text) and text[index + 1] in "!?….\"')”":
+    while index + 1 < len(text) and text[index + 1] in CLOSERS:
         index += 1
     return index + 1
 

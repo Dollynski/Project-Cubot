@@ -83,9 +83,16 @@ class Speaker:
         self._player = player
         self._chime = chime()
 
+    def synthesize(self, text: str) -> AudioClip:
+        return self._synthesizer.synthesize(text)
+
+    def play(self, clip: AudioClip) -> None:
+        """Toca o trecho e só retorna quando ele terminar."""
+        self._player.play(clip)
+
     def say(self, text: str) -> None:
         if text.strip():
-            self._player.play(self._synthesizer.synthesize(text))
+            self.play(self.synthesize(text))
 
     def chime(self) -> None:
         self._player.play(self._chime)
