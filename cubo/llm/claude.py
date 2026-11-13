@@ -5,7 +5,7 @@ from typing import Any
 
 import anthropic
 
-from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply
+from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply, Usage
 from cubo.tools.registry import ToolRegistry
 
 MAX_TOKENS = 16000
@@ -61,14 +61,18 @@ class ClaudeProvider(ChatProvider):
         previous = self.history_messages(history)
         new_messages: list[dict[str, Any]] = [{"role": "user", "content": user_text}]
 
+        usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
             response = self._create(system, tool_specs, [*previous, *new_messages])
+            usage += _usage_of(response)
             if response.stop_reason == "refusal":
                 raise ProviderError.refused()
             # O conteúdo volta inteiro para o histórico: os blocos de raciocínio precisam dele.
             new_messages.append({"role": "assistant", "content": response.content})
             if response.stop_reason != "tool_use":
-                return Reply(_text_of(response.content), Exchange(self.name, tuple(new_messages)))
+                return Reply(
+                    _text_of(response.content), Exchange(self.name, tuple(new_messages)), usage
+                )
             # Todos os resultados vão numa única mensagem, como a API espera.
             results = [
                 _tool_result(block, tools) for block in response.content if block.type == "tool_use"
@@ -112,6 +116,21 @@ class ClaudeProvider(ChatProvider):
         if isinstance(error, anthropic.APIConnectionError):
             return ProviderError.unreachable(self.display_name)
         return ProviderError.failed(self.display_name, type(error).__name__)
+
+
+def _usage_of(response: Any) -> Usage:
+    usage = getattr(response, "usage", None)
+
+    def count(field: str) -> int:
+        return getattr(usage, field, 0) or 0
+
+    # O que veio do cache de prompt também foi lido pelo modelo, então conta como entrada.
+    input_tokens = (
+        count("input_tokens")
+        + count("cache_creation_input_tokens")
+        + count("cache_read_input_tokens")
+    )
+    return Usage(input_tokens, count("output_tokens"))
 
 
 def _tool_result(block: Any, tools: ToolRegistry) -> dict[str, Any]:

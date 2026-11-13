@@ -24,9 +24,23 @@ class Exchange:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """Tokens gastos num pedido, somando todas as idas e voltas com a IA."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(
+            self.input_tokens + other.input_tokens, self.output_tokens + other.output_tokens
+        )
+
+
+@dataclass(frozen=True)
 class Reply:
     text: str
     exchange: Exchange
+    usage: Usage = Usage()
 
 
 class ProviderError(Exception):
@@ -68,6 +82,12 @@ class ProviderError(Exception):
         if status == 429:
             return cls.rate_limited(provider)
         return cls.failed(provider, f"HTTP {status}")
+
+    @classmethod
+    def limit_reached(cls, period: str) -> "ProviderError":
+        return cls(
+            f"Atingi o limite de chamadas à IA por {period}. Dá para ajustar esse limite no painel."
+        )
 
     @classmethod
     def refused(cls) -> "ProviderError":
