@@ -16,7 +16,8 @@ from cubo.llm.base import ProviderError
 from cubo.service import CuboService
 from cubo.tools.home_assistant import HomeAssistantError
 from cubo.usage import UsageTracker
-from cubo.voice.events import Heard, Replied
+from cubo.voice.events import Heard, Replied, Timed
+from cubo.voice.timing import Timing
 from cubo.web.auth import LoginThrottle, PanelAuth
 from cubo.web.pages import ai as ai_page
 from cubo.web.pages import audio as audio_page
@@ -217,6 +218,31 @@ async def test_signing_out_returns_to_the_login(world):
         await user.should_see("Entrar no Cubô")
         await user.open("/ia")
         await user.should_see("Entrar no Cubô")
+
+
+async def test_home_says_there_are_no_measured_requests_yet(world):
+    async with user_simulation(main_file=MAIN_FILE) as user:
+        await sign_in(user, world)
+
+        await user.should_see("Tempo de resposta")
+        await user.should_see("Ainda não há pedidos medidos.")
+
+
+async def test_home_shows_the_latency_of_each_stage(world):
+    world.service.activity.record(Timed(Timing(0.6, 0.9, 2.0, 1.8, 4.2)))
+    world.service.activity.record(Timed(Timing(0.8, None, 3.0, 2.2, 5.0)))
+    async with user_simulation(main_file=MAIN_FILE) as user:
+        await sign_in(user, world)
+        client = await user.open("/")
+
+        page = json.dumps(
+            [item._to_dict() for item in client.elements.values()], default=str, ensure_ascii=False
+        )
+        assert "O Cubô começa a falar" in page
+        assert "2,2 s" in page  # último pedido
+        assert "2,0 s" in page  # média de começar a falar (1,8 e 2,2)
+        assert "Média dos últimos 2" in page
+        assert "—" in page  # a IA do segundo pedido não entregou aos poucos
 
 
 # ---- IA
@@ -466,6 +492,19 @@ async def test_an_invalid_voice_value_is_refused(world, monkeypatch):
 
         assert await notified(user, "silence_seconds")
         assert world.service.config.voice == VoiceSettings()
+
+
+async def test_speaking_while_the_reply_arrives_can_be_turned_off(world, monkeypatch):
+    stub_models(monkeypatch, [])
+    async with user_simulation(main_file=MAIN_FILE) as user:
+        await sign_in(user, world)
+        await user.open("/voz")
+        element(user, ui.switch, "Começar a falar antes").set_value(False)
+        user.find(kind=ui.button, content="Salvar").click()
+
+        assert await notified(user, "Salvo")
+        assert world.service.config.voice.stream_speech is False
+        assert world.service.voice.reconfigured[-1].stream_speech is False
 
 
 async def test_the_saved_voice_can_be_heard(world, monkeypatch):
