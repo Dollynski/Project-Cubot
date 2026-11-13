@@ -34,7 +34,9 @@ No Linux/macOS:
 `source venv/bin/activate`
 
 ## 1.3. Instale as dependências
-`pip install -r requirements.txt`
+`pip install -e .`
+
+Para desenvolver (lint e testes): `pip install -e ".[dev]"`
 
 
 # 1.4. Instalação do whisper.cpp (Speech-to-Text Local)
