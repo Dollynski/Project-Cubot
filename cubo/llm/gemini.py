@@ -7,7 +7,7 @@ import httpx2
 from google import genai
 from google.genai import errors, types
 
-from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply
+from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply, Usage
 from cubo.tools.registry import ToolRegistry
 
 
@@ -36,8 +36,10 @@ class GeminiProvider(ChatProvider):
         previous = self.history_messages(history)
         new_contents = [types.Content(role="user", parts=[types.Part(text=user_text)])]
 
+        usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
             response = self._generate([*previous, *new_contents], config)
+            usage += _usage_of(response)
             content = response.candidates[0].content if response.candidates else None
             if content is None:
                 # Sem candidato: o pedido foi bloqueado pelos filtros de segurança.
@@ -45,7 +47,7 @@ class GeminiProvider(ChatProvider):
             new_contents.append(content)
             calls = response.function_calls or []
             if not calls:
-                return Reply(_text_of(content), Exchange(self.name, tuple(new_contents)))
+                return Reply(_text_of(content), Exchange(self.name, tuple(new_contents)), usage)
             # O Gemini 3 exige uma resposta por chamada, com o mesmo id e nome.
             responses = [_function_response(call, tools) for call in calls]
             new_contents.append(types.Content(role="user", parts=responses))
@@ -82,6 +84,15 @@ class GeminiProvider(ChatProvider):
                 return ProviderError.invalid_key(self.display_name)
             return ProviderError.from_status(self.display_name, self._model, error.code)
         return ProviderError.failed(self.display_name, type(error).__name__)
+
+
+def _usage_of(response: types.GenerateContentResponse) -> Usage:
+    metadata = response.usage_metadata
+    # O raciocínio do modelo é cobrado como saída, mas vem fora da contagem dos candidatos.
+    output = (getattr(metadata, "candidates_token_count", 0) or 0) + (
+        getattr(metadata, "thoughts_token_count", 0) or 0
+    )
+    return Usage(getattr(metadata, "prompt_token_count", 0) or 0, output)
 
 
 def _declarations(tools: ToolRegistry) -> list[types.Tool]:

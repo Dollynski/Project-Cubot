@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import anthropic
 import pytest
 
-from cubo.llm.base import Exchange, ProviderError
+from cubo.llm.base import Exchange, ProviderError, Usage
 from cubo.llm.claude import FALLBACK_BETA, THINKING_BINDING_BETA, ClaudeProvider
 from cubo.tools.registry import ToolRegistry
 from tests.fakes import REQUEST, home_tools, http_response
@@ -163,3 +163,36 @@ def test_stops_after_too_many_tool_rounds():
 def test_translates_sdk_errors(error, message):
     with pytest.raises(ProviderError, match=message):
         ask(provider(FakeAnthropic(error)))
+
+
+def with_usage(message, *, input_tokens, output_tokens, cache_read=0, cache_creation=0):
+    message.usage = SimpleNamespace(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_input_tokens=cache_read,
+        cache_creation_input_tokens=cache_creation,
+    )
+    return message
+
+
+def test_sums_token_usage_including_the_prompt_cache():
+    client = FakeAnthropic(
+        with_usage(
+            response("tool_use", tool_use("t1", "ler_estado", {"dispositivo": "sala"})),
+            input_tokens=100,
+            output_tokens=10,
+            cache_creation=500,
+        ),
+        with_usage(
+            response("end_turn", text("Ligada.")),
+            input_tokens=20,
+            output_tokens=5,
+            cache_read=600,
+        ),
+    )
+
+    assert ask(provider(client), tools=home_tools()).usage == Usage(1220, 15)
+
+
+def test_response_without_usage_counts_zero_tokens():
+    assert ask(provider(FakeAnthropic(response("end_turn", text("Oi"))))).usage == Usage()

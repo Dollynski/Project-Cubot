@@ -1,7 +1,8 @@
 import stat
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 import cubo.__main__ as cli
 from cubo.assistant import Assistant
@@ -11,7 +12,7 @@ from cubo.credentials import CredentialStore
 from cubo.errors import SetupError
 from cubo.llm.memory import ConversationMemory
 from cubo.tools.registry import ToolRegistry
-from cubo.voice.builder import VoiceRuntime
+from cubo.voice import models
 from cubo.voice.events import Heard, Replied
 from cubo.voice.models import DownloadError
 from tests.test_assistant import FakeProvider
@@ -91,59 +92,92 @@ def test_voice_is_the_default_mode(monkeypatch):
     assert cli.main([]) == 7
 
 
-def test_voice_mode_without_models_points_to_prepare(monkeypatch, capsys):
-    assistant = Assistant(
-        provider=FakeProvider(text="oi"),
-        tools=ToolRegistry(),
-        memory=ConversationMemory(max_exchanges=5, idle_timeout_seconds=600),
-        system_prompt="",
-    )
-    monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
+class FakeSession:
+    """Sessão de voz falsa, que fala assim que é ligada."""
 
-    assert cli.main([]) == 2
+    warnings = ["voz reserva"]
+    stopped = False
+
+    def __init__(self, _settings, _assistant, _data_dir, on_event):
+        self.on_event = on_event
+        self.error = None
+        self.running = True
+
+    def start(self):
+        self.on_event(Heard("que horas são"))
+        self.on_event(Replied("São três da tarde."))
+
+    def stop(self):
+        FakeSession.stopped = True
+
+
+def configure_gemini_key():
+    CredentialStore(secrets_file(), environ={}).set("gemini", "AIza-teste-1234")
+
+
+def test_voice_without_models_points_to_prepare(capsys):
+    configure_gemini_key()
+
+    assert cli.main(["--sem-painel"]) == 2
 
     assert "cubo preparar" in capsys.readouterr().err
 
 
-def test_voice_mode_prints_the_conversation(monkeypatch, capsys):
-    class FakeLoop:
-        def run(self, _stop):
-            self.on_event(Heard("que horas são"))
-            self.on_event(Replied("São três da tarde."))
+def test_voice_without_panel_prints_the_conversation(monkeypatch, capsys):
+    configure_gemini_key()
+    FakeSession.stopped = False
+    monkeypatch.setattr("cubo.voice.session.VoiceSession", FakeSession)
+    monkeypatch.setattr(cli, "_wait_until_interrupted", lambda: None)
 
-    loop = FakeLoop()
-
-    def fake_build_voice(_settings, _assistant, _data_dir, on_event):
-        loop.on_event = on_event
-        return VoiceRuntime(loop=loop, microphone=nullcontext(), warnings=["voz reserva"])
-
-    assistant = Assistant(
-        provider=FakeProvider(text="oi"),
-        tools=ToolRegistry(),
-        memory=ConversationMemory(max_exchanges=5, idle_timeout_seconds=600),
-        system_prompt="",
-    )
-    monkeypatch.setattr(cli, "build_runtime", lambda *_: Runtime(assistant=assistant))
-    monkeypatch.setattr("cubo.voice.builder.build_voice", fake_build_voice)
-
-    assert cli.main([]) == 0
+    assert cli.main(["--sem-painel"]) == 0
 
     output = capsys.readouterr().out
     assert "Aviso: voz reserva" in output
     assert "você> que horas são" in output
     assert "cubô> São três da tarde." in output
+    assert FakeSession.stopped
+
+
+def test_default_mode_runs_voice_and_the_panel(monkeypatch):
+    configure_gemini_key()
+    FakeSession.stopped = False
+    monkeypatch.setattr("cubo.voice.session.VoiceSession", FakeSession)
+    shown = []
+    monkeypatch.setattr(cli, "_run_panel", lambda service, config_dir: shown.append(service))
+
+    assert cli.main([]) == 0
+
+    assert shown[0].voice_enabled
+    assert shown[0].voice is not None
+    assert FakeSession.stopped
+
+
+def test_panel_command_runs_without_voice(monkeypatch):
+    shown = []
+    monkeypatch.setattr(cli, "_run_panel", lambda service, config_dir: shown.append(service))
+
+    assert cli.main(["painel"]) == 0
+
+    assert not shown[0].voice_enabled
+    assert "ia" in shown[0].problems
+
+
+def test_nothing_to_run_without_voice_and_without_panel(capsys):
+    assert cli.main(["--sem-painel", "painel"]) == 2
+
+    assert "Erro" in capsys.readouterr().err
 
 
 def test_prepare_downloads_what_the_config_asks_for(monkeypatch, capsys):
     downloads = []
     monkeypatch.setattr(
-        cli, "download_wake_word", lambda name, data_dir, _http: downloads.append(("wake", name))
+        models, "download_wake_word", lambda name, data_dir, _http: downloads.append(("wake", name))
     )
     monkeypatch.setattr(
-        cli, "download_piper_voice", lambda voice, data_dir: downloads.append(("voz", voice))
+        models, "download_piper_voice", lambda voice, data_dir: downloads.append(("voz", voice))
     )
     monkeypatch.setattr(
-        cli, "download_whisper", lambda model, data_dir: downloads.append(("whisper", model))
+        models, "download_whisper", lambda model, data_dir: downloads.append(("whisper", model))
     )
 
     assert cli.main(["preparar"]) == 0
@@ -160,7 +194,7 @@ def test_prepare_reports_a_failed_download(monkeypatch, capsys):
     def offline(*_args):
         raise DownloadError("sem rede")
 
-    monkeypatch.setattr(cli, "download_wake_word", offline)
+    monkeypatch.setattr(models, "download_wake_word", offline)
 
     assert cli.main(["preparar"]) == 1
 
@@ -192,3 +226,26 @@ def test_audio_without_portaudio_explains(monkeypatch, capsys):
     assert cli.main(["audio"]) == 2
 
     assert "PortAudio" in capsys.readouterr().err
+
+
+def test_password_reset_erases_the_panel_password(capsys):
+    from cubo.web.auth import AUTH_FILE_NAME, PanelAuth
+
+    auth = PanelAuth(default_config_dir() / AUTH_FILE_NAME)
+    auth.set_password("senha-segura-123")
+
+    assert cli.main(["senha", "--redefinir"]) == 0
+
+    assert not auth.has_password
+    assert "apagada" in capsys.readouterr().out
+
+
+def test_password_reset_without_a_password_says_so(capsys):
+    assert cli.main(["senha", "--redefinir"]) == 0
+
+    assert "ainda não tem senha" in capsys.readouterr().out
+
+
+def test_password_command_needs_the_flag():
+    with pytest.raises(SystemExit):
+        cli.main(["senha"])

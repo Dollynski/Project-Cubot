@@ -4,7 +4,7 @@ import httpx2
 import pytest
 from google.genai import errors, types
 
-from cubo.llm.base import ProviderError
+from cubo.llm.base import ProviderError, Usage
 from cubo.llm.gemini import GeminiProvider
 from cubo.tools.registry import ToolRegistry
 from tests.fakes import REQUEST, home_tools
@@ -112,3 +112,27 @@ def test_lists_only_chat_models_without_prefix():
 def test_translates_sdk_errors(error, message):
     with pytest.raises(ProviderError, match=message):
         ask(FakeGenai(error))
+
+
+def with_usage(message, prompt, candidates, thoughts=None):
+    message.usage_metadata = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=prompt,
+        candidates_token_count=candidates,
+        thoughts_token_count=thoughts,
+    )
+    return message
+
+
+def test_sums_token_usage_and_charges_thoughts_as_output():
+    client = FakeGenai(
+        with_usage(
+            model_response(call("c1", "ler_estado", {"dispositivo": "sala"})), 100, 10, thoughts=40
+        ),
+        with_usage(model_response(types.Part(text="Ligada.")), 150, 20),
+    )
+
+    assert ask(client, home_tools()).usage == Usage(250, 70)
+
+
+def test_response_without_usage_counts_zero_tokens():
+    assert ask(FakeGenai(model_response(types.Part(text="Oi")))).usage == Usage()

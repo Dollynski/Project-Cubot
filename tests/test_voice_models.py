@@ -4,6 +4,7 @@ from pathlib import Path
 import httpx2
 import pytest
 
+from cubo.config import VoiceSettings
 from cubo.voice import models
 from cubo.voice.models import (
     DownloadError,
@@ -11,9 +12,12 @@ from cubo.voice.models import (
     download_piper_voice,
     download_wake_word,
     download_whisper,
+    missing_models,
     piper_voice_path,
+    prepare_models,
     wake_word_path,
     whisper_dir,
+    whisper_downloaded,
 )
 
 CONTENT = b"modelo de teste"
@@ -183,3 +187,48 @@ def test_whisper_failure_is_reported(tmp_path, monkeypatch):
 
     with pytest.raises(DownloadError, match="base"):
         download_whisper("base", tmp_path)
+
+
+def test_everything_is_missing_in_an_empty_data_dir(tmp_path):
+    missing = missing_models(VoiceSettings(), tmp_path)
+
+    assert len(missing) == 3
+    assert "palavra de ativação 'hey_jarvis'" in missing[0]
+    assert "voz 'pt_BR-faber-medium'" in missing[1]
+    assert "modelo de transcrição 'base' (cerca de 145 MB)" in missing[2]
+
+
+def test_nothing_is_missing_when_the_files_are_there(tmp_path, monkeypatch):
+    settings = VoiceSettings()
+    wake = wake_word_path(settings.wake_word, tmp_path)
+    voice = piper_voice_path(settings.piper_voice, tmp_path)
+    for path in (wake, voice, voice.with_name(f"{voice.name}.json")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    monkeypatch.setattr(models, "whisper_downloaded", lambda *_: True)
+
+    assert missing_models(settings, tmp_path) == []
+
+
+def test_a_custom_wake_word_is_not_ours_to_download(tmp_path, monkeypatch):
+    monkeypatch.setattr(models, "whisper_downloaded", lambda *_: True)
+    settings = VoiceSettings(wake_word=str(tmp_path / "meu.onnx"))
+
+    assert all("palavra de ativação" not in item for item in missing_models(settings, tmp_path))
+
+
+def test_whisper_is_not_downloaded_in_an_empty_data_dir(tmp_path):
+    assert whisper_downloaded("base", tmp_path) is False
+
+
+def test_prepare_downloads_everything_and_reports_progress(tmp_path, monkeypatch):
+    done = []
+    monkeypatch.setattr(models, "download_wake_word", lambda name, *_: done.append(name))
+    monkeypatch.setattr(models, "download_piper_voice", lambda voice, _dir: done.append(voice))
+    monkeypatch.setattr(models, "download_whisper", lambda model, _dir: done.append(model))
+    messages = []
+
+    prepare_models(VoiceSettings(), tmp_path, messages.append)
+
+    assert done == ["hey_jarvis", "pt_BR-faber-medium", "base"]
+    assert len(messages) == 3

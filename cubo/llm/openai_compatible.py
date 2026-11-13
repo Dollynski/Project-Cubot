@@ -6,7 +6,7 @@ from typing import Any
 
 import openai
 
-from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply
+from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply, Usage
 from cubo.tools.registry import ToolRegistry
 
 
@@ -48,15 +48,18 @@ class OpenAICompatibleProvider(ChatProvider):
         previous = [{"role": "system", "content": system}, *self.history_messages(history)]
         new_messages: list[dict[str, Any]] = [{"role": "user", "content": user_text}]
 
+        usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
-            message = self._complete([*previous, *new_messages], tool_specs)
+            response = self._complete([*previous, *new_messages], tool_specs)
+            usage += _usage_of(response)
+            message = response.choices[0].message
             if message.refusal:
                 raise ProviderError.refused()
             calls = [call for call in message.tool_calls or [] if call.type == "function"]
             new_messages.append(_assistant_message(message.content, calls))
             if not calls:
                 text = (message.content or "").strip()
-                return Reply(text, Exchange(self.name, tuple(new_messages)))
+                return Reply(text, Exchange(self.name, tuple(new_messages)), usage)
             new_messages.extend(_tool_message(call, tools) for call in calls)
 
         raise ProviderError.too_many_tool_rounds()
@@ -75,7 +78,7 @@ class OpenAICompatibleProvider(ChatProvider):
             )
         except openai.APIError as error:
             raise self._translate(error) from error
-        return response.choices[0].message
+        return response
 
     def _translate(self, error: openai.APIError) -> ProviderError:
         if isinstance(error, openai.APIStatusError):
@@ -83,6 +86,13 @@ class OpenAICompatibleProvider(ChatProvider):
         if isinstance(error, openai.APIConnectionError):
             return ProviderError.unreachable(self.display_name)
         return ProviderError.failed(self.display_name, type(error).__name__)
+
+
+def _usage_of(response: Any) -> Usage:
+    usage = getattr(response, "usage", None)  # alguns servidores, como o Ollama, podem omitir
+    return Usage(
+        getattr(usage, "prompt_tokens", 0) or 0, getattr(usage, "completion_tokens", 0) or 0
+    )
 
 
 def _assistant_message(content: str | None, calls: list[Any]) -> dict[str, Any]:

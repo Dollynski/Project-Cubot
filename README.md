@@ -2,11 +2,12 @@
 
 Assistente de voz open source em português, integrado ao Home Assistant. Feito para rodar numa placa ARM64 (como uma Orange Pi) ou num PC Linux.
 
-> **Em refatoração** ([#14](https://github.com/Dollynski/Project-Cubot/issues/14)). O Cubô já funciona por **voz** e em **modo texto**. O painel web de configuração chega na Fase 3 ([#20](https://github.com/Dollynski/Project-Cubot/issues/20)); por enquanto a configuração é feita pelo `config.toml`.
+> **Em refatoração** ([#14](https://github.com/Dollynski/Project-Cubot/issues/14)). O Cubô funciona por **voz**, em **modo texto** e tem um **painel web** para configurar tudo. Ainda faltam a otimização da latência e a instalação como serviço (Fases 4 e 5).
 
 ## O que ele faz
 
 - Fica esperando a palavra de ativação ("hey jarvis"), escuta o pedido, responde falando e volta a esperar. Tudo na sua máquina, exceto a conversa com o provedor de IA escolhido.
+- Tem um painel web (no celular ou no PC) para configurar áudio, voz, IA e Home Assistant sem editar arquivos.
 - Conversa em português com o provedor de IA que você escolher: Gemini, Claude, OpenAI ou Ollama (local).
 - Controla e consulta dispositivos do Home Assistant (luzes, tomadas, sensores) e só confirma uma ação depois de ver o estado mudar.
 
@@ -132,13 +133,55 @@ speech_speed = 1.0              # de 0,5 a 2
 
 Sem a voz do Piper, o Cubô usa o `espeak-ng` (`sudo apt install espeak-ng`), se estiver instalado, com um aviso.
 
+## Painel web
+
+Ao rodar `cubo`, o painel sobe junto com a voz. O terminal mostra o endereço (por padrão, `http://localhost:8080`).
+
+No **primeiro acesso** o painel pede uma senha nova e o **código que o terminal mostrou** ao iniciar. Assim, quem está só na mesma rede não consegue definir a senha antes de você. Depois disso, o acesso é por senha, e o login é bloqueado por alguns minutos depois de 5 tentativas erradas.
+
+Páginas:
+
+- **Início:** o que o Cubô está fazendo (aguardando, ouvindo, pensando, falando), o volume do microfone, a conversa recente e o uso da IA.
+- **Áudio:** escolha do microfone e do alto-falante, com teste de som.
+- **Voz e fala:** palavra de ativação e sensibilidade, tempo de silêncio, modelo do Whisper e voz do Piper. Se faltar algum modelo, o painel avisa o tamanho e oferece baixar.
+- **IA:** provedor, modelo, chave de API, personalidade, memória e limites de uso.
+- **Casa:** endereço e token do Home Assistant, com teste de conexão, e os dispositivos.
+- **Segurança:** troca de senha e como o painel pode ser acessado.
+
+Detalhes:
+
+- As **chaves e tokens são só de escrita**: o painel nunca mostra o valor salvo, só os 4 últimos caracteres. Cada chave é conferida com o provedor antes de ser salva, e uma chave recusada não é guardada.
+- **Salvar recarrega só o que mudou**: trocar a voz não reinicia a transcrição, trocar o silêncio não reinicia nada além da gravação, e assim por diante. Se algo não carregar (modelo ausente, dispositivo inexistente), a configuração não é salva e o painel explica o motivo.
+- **Limites de uso:** chamadas à IA por minuto e por dia (zero desliga o limite) e um contador de tokens. O total do dia fica salvo, então o limite vale também depois de reiniciar.
+- **Só neste aparelho (padrão):** o painel só atende `localhost`. Em **Segurança** dá para liberar o acesso de outros aparelhos da rede (celular, outro PC); isso vale depois de reiniciar. Nesse caso use HTTPS: informe um certificado e uma chave, ou gere um próprio com `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=cubo" -keyout chave.pem -out certificado.pem`.
+- **Esqueci a senha:** rode `cubo senha --redefinir` no aparelho e abra o painel de novo.
+
+Variações de uso:
+
+```bash
+cubo painel        # só o painel, sem ligar o microfone (para configurar sem áudio)
+cubo --sem-painel  # só a voz, sem o painel
+```
+
+As mesmas opções ficam no `config.toml`, na seção `[panel]`:
+
+```toml
+[panel]
+listen = "local"    # ou "network"
+port = 8080
+ssl_certfile = ""   # caminho do certificado, para usar HTTPS
+ssl_keyfile = ""    # caminho da chave do certificado
+```
+
+e os limites de uso, em `[llm]`: `max_calls_per_minute = 20` e `max_calls_per_day = 500`.
+
 ## Uso
 
 ```bash
 cubo
 ```
 
-O Cubô fica ouvindo: diga "hey jarvis", espere o bipe e faça o pedido. `Ctrl+C` sai.
+O Cubô fica ouvindo: diga "hey jarvis", espere o bipe e faça o pedido. `Ctrl+C` sai. O painel web sobe junto (veja [Painel web](#painel-web)).
 
 Para conversar digitando, sem áudio:
 

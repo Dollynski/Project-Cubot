@@ -2,9 +2,10 @@ from types import SimpleNamespace
 
 import openai
 import pytest
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
 
-from cubo.llm.base import ProviderError
+from cubo.llm.base import ProviderError, Usage
 from cubo.llm.openai_compatible import OpenAICompatibleProvider
 from cubo.tools.registry import ToolRegistry
 from tests.fakes import REQUEST, home_tools, http_response
@@ -110,3 +111,28 @@ def test_refusal_raises_provider_error():
 def test_translates_sdk_errors_with_the_provider_name(error, message):
     with pytest.raises(ProviderError, match=message):
         ask(FakeOpenAI(error), name="ollama")
+
+
+def with_usage(response, prompt_tokens, completion_tokens):
+    usage = CompletionUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+    return response.model_copy(update={"usage": usage})
+
+
+def test_sums_token_usage_across_tool_rounds():
+    client = FakeOpenAI(
+        with_usage(
+            completion(tool_calls=[("c1", "ler_estado", '{"dispositivo": "sala"}')]), 100, 10
+        ),
+        with_usage(completion("Ligada."), 150, 20),
+    )
+
+    assert ask(client, home_tools()).usage == Usage(250, 30)
+
+
+def test_server_without_usage_counts_zero_tokens():
+    # O Ollama e outros servidores compatíveis podem não informar o uso.
+    assert ask(FakeOpenAI(completion("Oi"))).usage == Usage()

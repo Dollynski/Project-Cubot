@@ -15,7 +15,9 @@ dependencies = [
     "google-genai>=3.3",
     "httpx2>=2.16",
     "huggingface-hub>=1.0",
+    "ifaddr>=0.2",
     "livekit-wakeword>=2.1",
+    "nicegui>=4.0",
     "numpy>=2.0",
     "openai>=3.50",
     "piper-tts>=1.8",
@@ -27,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["anyio", "pytest", "ruff"]
 
 [project.scripts]
 cubo = "cubo.__main__:main"
@@ -44,3 +46,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Só os test_*.py são testes: os outros arquivos de tests/ são apoio e não podem ser executados.
+python_files = ["test_*.py"]
