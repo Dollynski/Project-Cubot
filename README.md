@@ -114,7 +114,7 @@ Para escolher o microfone e o alto-falante, liste os dispositivos:
 cubo audio
 ```
 
-e ponha o número ou parte do nome no `config.toml`. Vazio usa o padrão do sistema. Todos os campos são opcionais:
+e ponha parte do nome (como `"USB"`) no `config.toml`. Prefira o nome ao número: os números mudam quando um dispositivo é ligado ou desligado. Vazio usa o padrão do sistema. Todos os campos são opcionais:
 
 ```toml
 [voice]

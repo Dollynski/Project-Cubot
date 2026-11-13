@@ -193,8 +193,9 @@ def _run_audio_list(
         ]
         print(f"{device.index:>3}  {device.name} ({', '.join(kinds)})")
     print(
-        f"\nPara escolher, ponha o número ou parte do nome em input_device / output_device, "
-        f"na seção [voice] de {config_dir / CONFIG_FILE_NAME}."
+        '\nPara escolher, ponha parte do nome (como "USB") em input_device / output_device, '
+        f"na seção [voice] de {config_dir / CONFIG_FILE_NAME}.\n"
+        "Prefira o nome: os números mudam quando um dispositivo é ligado ou desligado."
     )
     return 0
 

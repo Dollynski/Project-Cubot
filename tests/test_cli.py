@@ -180,6 +180,7 @@ def test_audio_lists_the_devices(monkeypatch, capsys):
     assert "Microfone USB (entrada)" in output
     assert "Placa de som (entrada, saída)" in output
     assert "config.toml" in output
+    assert "os números mudam" in output
 
 
 def test_audio_without_portaudio_explains(monkeypatch, capsys):
