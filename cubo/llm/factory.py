@@ -17,30 +17,35 @@ _OLLAMA_PLACEHOLDER_KEY = "ollama"
 
 
 def create_provider(settings: LLMSettings, credentials: CredentialStore) -> ChatProvider:
-    # Cada SDK é importado só quando é o escolhido: carregar os três atrasaria a inicialização.
     provider, model = settings.provider, settings.model
     if not model:
         raise SetupError(
             f"Nenhum modelo escolhido para {DISPLAY_NAMES[provider]}. "
             f"Preencha llm.models.{provider} no config.toml."
         )
+    api_key = "" if provider == "ollama" else _required_key(credentials, provider)
+    return build_provider(provider, api_key=api_key, model=model, ollama_url=settings.ollama_url)
+
+
+def build_provider(
+    provider: ProviderName, *, api_key: str, model: str, ollama_url: str
+) -> ChatProvider:
+    """Cria o provedor com a chave dada, sem precisar que ela esteja salva."""
+    # Cada SDK é importado só quando é o escolhido: carregar os três atrasaria a inicialização.
     match provider:
         case "gemini":
             from cubo.llm.gemini import GeminiProvider
 
-            return GeminiProvider(api_key=_required_key(credentials, "gemini"), model=model)
+            return GeminiProvider(api_key=api_key, model=model)
         case "claude":
             from cubo.llm.claude import ClaudeProvider
 
-            return ClaudeProvider(api_key=_required_key(credentials, "claude"), model=model)
+            return ClaudeProvider(api_key=api_key, model=model)
         case "openai":
             from cubo.llm.openai_compatible import OpenAICompatibleProvider
 
             return OpenAICompatibleProvider(
-                name="openai",
-                display_name=DISPLAY_NAMES["openai"],
-                api_key=_required_key(credentials, "openai"),
-                model=model,
+                name="openai", display_name=DISPLAY_NAMES["openai"], api_key=api_key, model=model
             )
         case "ollama":
             from cubo.llm.openai_compatible import OpenAICompatibleProvider
@@ -50,10 +55,18 @@ def create_provider(settings: LLMSettings, credentials: CredentialStore) -> Chat
                 display_name=DISPLAY_NAMES["ollama"],
                 api_key=_OLLAMA_PLACEHOLDER_KEY,
                 model=model,
-                base_url=settings.ollama_url,
+                base_url=ollama_url,
             )
         case _:
             raise SetupError(f"Provedor desconhecido: {provider}")
+
+
+def list_provider_models(provider: ProviderName, *, api_key: str, ollama_url: str) -> list[str]:
+    """Modelos disponíveis para a chave. Serve também para conferir se a chave é válida.
+
+    Levanta ``ProviderError`` se o provedor recusar a chave ou não responder.
+    """
+    return build_provider(provider, api_key=api_key, model="", ollama_url=ollama_url).list_models()
 
 
 def _required_key(credentials: CredentialStore, name: CredentialName) -> str:
