@@ -17,14 +17,17 @@ NAVIGATION = (
 
 @contextmanager
 def frame(current: str, on_sign_out: Callable[[], None]) -> Iterator[None]:
-    with ui.header(elevated=True).classes("items-center gap-2 no-wrap"):
-        ui.label("Cubô").classes("text-xl font-bold mr-2")
-        with ui.row().classes("gap-1 no-wrap overflow-x-auto grow"):
+    with ui.header(elevated=True).classes("flex-col items-stretch gap-0 p-0"):
+        with ui.row().classes("items-center justify-between no-wrap w-full px-3 pt-2"):
+            ui.label("Cubô").classes("text-xl font-bold")
+            sign_out = ui.button(icon="logout", on_click=on_sign_out)
+            sign_out.props("flat round dense").tooltip("Sair").mark("sair")
+        # Em tela estreita, a navegação rola para o lado em vez de quebrar os nomes.
+        with ui.row().classes("gap-1 no-wrap overflow-x-auto w-full px-2 pb-1"):
             for path, label in NAVIGATION:
                 button = ui.button(label, on_click=lambda target=path: ui.navigate.to(target))
                 button.props("dense unelevated" if path == current else "dense flat")
-                button.classes("text-white")
-        ui.button(icon="logout", on_click=on_sign_out).props("flat round dense").tooltip("Sair")
+                button.classes("text-white whitespace-nowrap")
     with ui.column().classes("w-full max-w-3xl mx-auto gap-4 p-2"):
         yield
 

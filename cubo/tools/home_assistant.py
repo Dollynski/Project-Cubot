@@ -81,6 +81,18 @@ class HomeAssistantClient:
         return response
 
 
+def verify_connection(base_url: str, token: str) -> None:
+    """Confere o endereço e o token com uma chamada de teste.
+
+    Levanta ``HomeAssistantError`` com a explicação se algo estiver errado.
+    """
+    client = HomeAssistantClient(base_url, token)
+    try:
+        client.check_connection()
+    finally:
+        client.close()
+
+
 class HomeAssistantTools:
     """Monta as ferramentas da IA para os dispositivos cadastrados."""
 

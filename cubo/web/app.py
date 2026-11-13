@@ -9,11 +9,16 @@ from nicegui.storage import Storage
 
 from cubo.config import PanelSettings
 from cubo.web import layout, session
-from cubo.web.pages import home, login
+from cubo.web.pages import ai, audio, home, home_assistant, login, security, voice
 from cubo.web.panel import Panel
 
 PAGES: dict[str, Callable[[Panel], None]] = {
     "/": home.build,
+    "/audio": audio.build,
+    "/voz": voice.build,
+    "/ia": ai.build,
+    "/casa": home_assistant.build,
+    "/seguranca": security.build,
 }
 
 
@@ -49,6 +54,7 @@ def _sign_out() -> None:
 
 def run_panel(panel: Panel, settings: PanelSettings, storage_dir: Path) -> None:
     """Sobe o painel e só retorna quando o servidor for encerrado."""
+    storage_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     Storage.path = storage_dir
     register_pages(panel)
     app.on_shutdown(panel.service.stop)
