@@ -41,7 +41,7 @@ class VoiceFactory(Protocol):
 class AssistantUnavailable:
     """Responde que a IA não está pronta, para a voz continuar funcionando enquanto isso."""
 
-    def reply(self, user_text: str) -> str:
+    def reply(self, user_text: str, on_text: Callable[[str], None] | None = None) -> str:
         return AI_UNAVAILABLE_SPEECH
 
 

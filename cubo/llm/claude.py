@@ -1,6 +1,6 @@
 """Adaptador para o Claude (SDK ``anthropic``)."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import anthropic
@@ -49,6 +49,7 @@ class ClaudeProvider(ChatProvider):
         history: Sequence[Exchange],
         user_text: str,
         tools: ToolRegistry,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         tool_specs = [
             {
@@ -63,7 +64,7 @@ class ClaudeProvider(ChatProvider):
 
         usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self._create(system, tool_specs, [*previous, *new_messages])
+            response = self._create(system, tool_specs, [*previous, *new_messages], on_text)
             usage += _usage_of(response)
             if response.stop_reason == "refusal":
                 raise ProviderError.refused()
@@ -88,7 +89,11 @@ class ClaudeProvider(ChatProvider):
             raise self._translate(error) from error
 
     def _create(
-        self, system: str, tool_specs: list[dict[str, Any]], messages: list[dict[str, Any]]
+        self,
+        system: str,
+        tool_specs: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        on_text: Callable[[str], None] | None,
     ) -> Any:
         options: dict[str, Any] = {"betas": [THINKING_BINDING_BETA]}
         if tool_specs:
@@ -96,17 +101,24 @@ class ClaudeProvider(ChatProvider):
         if self._model in MODELS_WITH_FALLBACK:
             options["betas"].append(FALLBACK_BETA)
             options["fallbacks"] = "default"
+        request = {
+            "model": self._model,
+            "max_tokens": MAX_TOKENS,
+            "system": system,
+            "messages": messages,
+            "thinking": THINKING,
+            "output_config": {"effort": VOICE_EFFORT},
+            "cache_control": {"type": "ephemeral"},
+            **options,
+        }
         try:
-            return self._client.beta.messages.create(
-                model=self._model,
-                max_tokens=MAX_TOKENS,
-                system=system,
-                messages=messages,
-                thinking=THINKING,
-                output_config={"effort": VOICE_EFFORT},
-                cache_control={"type": "ephemeral"},
-                **options,
-            )
+            if on_text is None:
+                return self._client.beta.messages.create(**request)
+            with self._client.beta.messages.stream(**request) as stream:
+                for text in stream.text_stream:
+                    on_text(text)
+                # A mensagem final, montada pelo SDK, é igual à da chamada sem streaming.
+                return stream.get_final_message()
         except anthropic.APIError as error:
             raise self._translate(error) from error
 

@@ -1,7 +1,7 @@
 """Adaptador para a API de chat da OpenAI, que também atende o Ollama."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import openai
@@ -33,6 +33,7 @@ class OpenAICompatibleProvider(ChatProvider):
         history: Sequence[Exchange],
         user_text: str,
         tools: ToolRegistry,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         tool_specs = [
             {
@@ -50,7 +51,7 @@ class OpenAICompatibleProvider(ChatProvider):
 
         usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self._complete([*previous, *new_messages], tool_specs)
+            response = self._complete([*previous, *new_messages], tool_specs, on_text)
             usage += _usage_of(response)
             message = response.choices[0].message
             if message.refusal:
@@ -70,15 +71,31 @@ class OpenAICompatibleProvider(ChatProvider):
         except openai.APIError as error:
             raise self._translate(error) from error
 
-    def _complete(self, messages: list[dict[str, Any]], tool_specs: list[dict[str, Any]]) -> Any:
+    def _complete(
+        self,
+        messages: list[dict[str, Any]],
+        tool_specs: list[dict[str, Any]],
+        on_text: Callable[[str], None] | None,
+    ) -> Any:
         options = {"tools": tool_specs} if tool_specs else {}
         try:
-            response = self._client.chat.completions.create(
-                model=self._model, messages=messages, **options
-            )
+            if on_text is None:
+                return self._client.chat.completions.create(
+                    model=self._model, messages=messages, **options
+                )
+            with self._client.chat.completions.stream(
+                model=self._model,
+                messages=messages,
+                # Sem isso o servidor não informa os tokens gastos no fim do streaming.
+                stream_options={"include_usage": True},
+                **options,
+            ) as stream:
+                for event in stream:
+                    if event.type == "content.delta":
+                        on_text(event.delta)
+                return stream.get_final_completion()
         except openai.APIError as error:
             raise self._translate(error) from error
-        return response
 
     def _translate(self, error: openai.APIError) -> ProviderError:
         if isinstance(error, openai.APIStatusError):

@@ -23,7 +23,7 @@ REPLACEABLE_PARTS = frozenset(
 
 
 class Replier(Protocol):
-    def reply(self, user_text: str) -> str:
+    def reply(self, user_text: str, on_text: Callable[[str], None] | None = None) -> str:
         """Responde ao que foi dito, já em texto pronto para falar."""
         ...
 

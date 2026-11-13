@@ -1,6 +1,6 @@
 """Adaptador para o Gemini (SDK ``google-genai``)."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import httpx2
@@ -26,6 +26,7 @@ class GeminiProvider(ChatProvider):
         history: Sequence[Exchange],
         user_text: str,
         tools: ToolRegistry,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         config = types.GenerateContentConfig(
             system_instruction=system,
@@ -38,7 +39,7 @@ class GeminiProvider(ChatProvider):
 
         usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self._generate([*previous, *new_contents], config)
+            response = self._generate([*previous, *new_contents], config, on_text)
             usage += _usage_of(response)
             content = response.candidates[0].content if response.candidates else None
             if content is None:
@@ -66,12 +67,20 @@ class GeminiProvider(ChatProvider):
         ]
 
     def _generate(
-        self, contents: list[types.Content], config: types.GenerateContentConfig
+        self,
+        contents: list[types.Content],
+        config: types.GenerateContentConfig,
+        on_text: Callable[[str], None] | None,
     ) -> types.GenerateContentResponse:
         try:
-            return self._client.models.generate_content(
+            if on_text is None:
+                return self._client.models.generate_content(
+                    model=self._model, contents=contents, config=config
+                )
+            chunks = self._client.models.generate_content_stream(
                 model=self._model, contents=contents, config=config
             )
+            return _merge_stream(chunks, on_text)
         except (errors.APIError, httpx2.TransportError) as error:
             raise self._translate(error) from error
 
@@ -84,6 +93,56 @@ class GeminiProvider(ChatProvider):
                 return ProviderError.invalid_key(self.display_name)
             return ProviderError.from_status(self.display_name, self._model, error.code)
         return ProviderError.failed(self.display_name, type(error).__name__)
+
+
+def _merge_stream(
+    chunks: Iterable[types.GenerateContentResponse], on_text: Callable[[str], None]
+) -> types.GenerateContentResponse:
+    """Junta os pedaços do streaming numa resposta igual à da chamada sem streaming."""
+    parts: list[types.Part] = []
+    metadata = None
+    for chunk in chunks:
+        metadata = chunk.usage_metadata or metadata
+        content = chunk.candidates[0].content if chunk.candidates else None
+        for part in (content.parts if content else None) or []:
+            if part.text and not part.thought:
+                on_text(part.text)
+            _append_part(parts, part)
+    if not parts:
+        # Nada veio: o pedido foi bloqueado pelos filtros de segurança.
+        return types.GenerateContentResponse(candidates=[], usage_metadata=metadata)
+    content = types.Content(role="model", parts=parts)
+    return types.GenerateContentResponse(
+        candidates=[types.Candidate(content=content)], usage_metadata=metadata
+    )
+
+
+def _append_part(parts: list[types.Part], part: types.Part) -> None:
+    """Soma textos seguidos do mesmo tipo; chamadas de função ficam como vieram.
+
+    A assinatura do raciocínio (``thought_signature``) vai junto com o texto que a recebe, pois
+    o Gemini 3 exige que ela volte no histórico.
+    """
+    previous = parts[-1] if parts else None
+    same_kind = (
+        previous is not None
+        and _is_text(previous)
+        and _is_text(part)
+        and bool(previous.thought) == bool(part.thought)
+    )
+    if not same_kind:
+        parts.append(part)
+        return
+    parts[-1] = previous.model_copy(
+        update={
+            "text": (previous.text or "") + (part.text or ""),
+            "thought_signature": part.thought_signature or previous.thought_signature,
+        }
+    )
+
+
+def _is_text(part: types.Part) -> bool:
+    return part.text is not None and part.function_call is None
 
 
 def _usage_of(response: types.GenerateContentResponse) -> Usage:
