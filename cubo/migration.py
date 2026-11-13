@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from cubo.config import Config, Device, HomeAssistantSettings
+from cubo.config import Config, Device, HomeAssistantSettings, VoiceSettings
 from cubo.credentials import CredentialStore
 
 # Entidades que o protótipo usava fixas no código.
@@ -36,4 +36,9 @@ def migrate_legacy_env(env_path: Path, credentials: CredentialStore) -> tuple[Co
         home_assistant.url = ha_url
         imported.append("endereço do Home Assistant")
 
-    return Config(home_assistant=home_assistant), imported
+    voice = VoiceSettings()
+    if microphone := values.get("MIC_DEVICE_INDEX", "").strip():
+        voice.input_device = microphone
+        imported.append("microfone")
+
+    return Config(home_assistant=home_assistant, voice=voice), imported
