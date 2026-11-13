@@ -40,3 +40,6 @@ build/
 *.png
 *.svg
 *.pdf
+
+# Padrões locais do mantenedor
+PADROES.md
