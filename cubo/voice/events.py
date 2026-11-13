@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from cubo.voice.timing import Timing
+
 
 class State(StrEnum):
     WAITING = "aguardando"
@@ -27,4 +29,11 @@ class Replied:
     text: str
 
 
-Event = StateChanged | Heard | Replied
+@dataclass(frozen=True)
+class Timed:
+    """Quanto cada etapa do pedido que acabou de terminar demorou."""
+
+    timing: Timing
+
+
+Event = StateChanged | Heard | Replied | Timed

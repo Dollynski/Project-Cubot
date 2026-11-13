@@ -1,5 +1,6 @@
 from cubo.activity import ActivityLog
-from cubo.voice.events import Heard, Replied, State, StateChanged
+from cubo.voice.events import Heard, Replied, State, StateChanged, Timed
+from cubo.voice.timing import Timing
 
 
 def test_keeps_the_conversation_in_order():
@@ -38,3 +39,13 @@ def test_forgets_the_oldest_entries():
         log.record(Heard(text))
 
     assert [entry.text for entry in log.entries()] == ["dois", "três"]
+
+
+def test_keeps_the_timings_of_the_latest_requests():
+    log = ActivityLog(max_timings=2)
+    timings = [Timing(0.5, 1.0, 2.0, 1.5, 3.0 + step) for step in range(3)]
+
+    for timing in timings:
+        log.record(Timed(timing))
+
+    assert log.timings() == timings[1:]

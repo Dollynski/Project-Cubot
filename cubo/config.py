@@ -83,6 +83,8 @@ class VoiceSettings(BaseModel):
     whisper_compute_type: str = "int8"
     piper_voice: str = "pt_BR-faber-medium"
     speech_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    # Começa a falar na primeira frase, sem esperar a IA terminar de escrever a resposta.
+    stream_speech: bool = True
 
 
 class PanelSettings(BaseModel):
