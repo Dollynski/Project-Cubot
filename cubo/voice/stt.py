@@ -42,6 +42,9 @@ class Transcriber:
             beam_size=1,
             condition_on_previous_text=False,
             vad_filter=False,
+            # Sem as repetições com temperatura maior: num áudio ruim elas multiplicam o tempo de
+            # transcrição (de 0,5 s para vários segundos) e costumam piorar o texto.
+            temperature=0.0,
         )
         # `segments` é um gerador: a transcrição só acontece de fato ao percorrê-lo.
         spoken = [
