@@ -256,6 +256,12 @@ def test_the_certificate_uses_the_new_hostname(home):
     assert "DNS:cubo-teste.local" in output
 
 
+def test_the_local_name_is_only_announced_when_the_panel_is_on_the_network(home):
+    assert ".local" not in simulate(home=home)
+    assert ".local" not in simulate("--sem-avahi", "--rede", home=home).split("==> Pronto")[1]
+    assert "Na rede, também em:" in simulate("--rede", home=home).split("==> Pronto")[1]
+
+
 # ---- uninstall
 
 

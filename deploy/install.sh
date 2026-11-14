@@ -176,11 +176,19 @@ install_unit() {
   run systemctl --user restart "$UNIT_NAME"
 }
 
+# O nome.local só serve se o painel está liberado para a rede e o avahi está instalado.
+network_hint() {
+  if ((OPEN_NETWORK && WITH_AVAHI)); then
+    note "Na rede, também em: $(hostname).local"
+  fi
+}
+
 report() {
   local since="$1" deadline=$((SECONDS + WAIT_SECONDS))
   say "Pronto"
   if ((SIMULATE)); then
     note "[simular] aqui aparecem o endereço do painel e o código do primeiro acesso."
+    network_hint
     return 0
   fi
   until journalctl --user -u "$UNIT_NAME" --since "$since" -o cat --no-pager 2>/dev/null | grep -q '^Painel:'; do
@@ -191,7 +199,7 @@ report() {
     sleep 2
   done
   journalctl --user -u "$UNIT_NAME" --since "$since" -o cat --no-pager | grep -E '^(Painel|Primeiro acesso|Aviso)' || true
-  if ((WITH_AVAHI)); then note "Na rede, também em: $(hostname).local"; fi
+  network_hint
   note "Abra o painel, informe o código de primeiro acesso e defina a senha."
   note "Depois, em IA, escolha o provedor e cole a chave."
   note "Log: journalctl --user -u cubo -f  |  Parar: systemctl --user stop cubo"
