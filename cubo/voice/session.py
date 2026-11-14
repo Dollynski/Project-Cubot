@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from cubo.config import VoiceSettings
+from cubo.errors import SetupError
 from cubo.voice import load_devices
 from cubo.voice.builder import load_synthesizer, load_transcriber, load_wake_word, parse_device
 from cubo.voice.events import Event
@@ -19,6 +20,8 @@ from cubo.voice.tts import Speaker
 logger = logging.getLogger(__name__)
 
 STOP_TIMEOUT_SECONDS = 10.0
+# Quanto esperar um pedido em andamento terminar antes de trocar o microfone.
+SWAP_WAIT_SECONDS = 120.0
 
 
 class Part(StrEnum):
@@ -99,9 +102,14 @@ class VoiceSession:
         if self.running:
             return
         self.error = None
-        self._stop = threading.Event()
-        self._microphone.open()
-        self._thread = threading.Thread(target=self._run, name="cubo-voz", daemon=True)
+        # A thread leva o microfone e o sinal de parada que são dela: se eles forem trocados
+        # depois, ela continua fechando e obedecendo os seus, e não os da thread nova.
+        stop, microphone = threading.Event(), self._microphone
+        microphone.open()
+        self._stop = stop
+        self._thread = threading.Thread(
+            target=self._run, args=(microphone, stop), name="cubo-voz", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
@@ -156,22 +164,59 @@ class VoiceSession:
 
         # Aquece só o que é novo, antes de trocar: o primeiro pedido depois de salvar não demora.
         self._warm_up(*parts.values())
+        if microphone is not None:
+            # Primeiro o microfone, que é o único que pode falhar na troca: assim, se ele falhar,
+            # nenhuma outra peça foi trocada.
+            self._swap_microphone(microphone)
         self._loop.replace(**parts)
         self._loop.stream_speech = new.stream_speech
         if "speaker" in parts:
             self._synthesizer, self._player, self._speaker = synthesizer, player, parts["speaker"]
-        if microphone is not None:
-            self._swap_microphone(microphone)
         self._settings = new
         return [part.value for part in Part if part in changed]
 
     def _swap_microphone(self, microphone: Any) -> None:
+        """Troca o microfone esperando o ciclo atual terminar de verdade.
+
+        Se o novo não abrir, volta a escutar pelo antigo e levanta ``SetupError``.
+        """
         was_running = self.running
+        self._stop_and_wait()
+        previous = self._microphone
+        self._use_microphone(microphone)
+        if not was_running:
+            return
+        try:
+            self.start()
+        except SetupError:
+            self._use_microphone(previous)
+            try:
+                self.start()
+            except SetupError:
+                logger.exception("Não consegui voltar ao microfone anterior")
+            raise
+
+    def _stop_and_wait(self) -> None:
+        """Para o ciclo e espera a thread acabar, mesmo que um pedido longo esteja em andamento.
+
+        Duas threads nunca rodam juntas no mesmo ciclo: uma delas atrapalharia a outra.
+        """
         self.stop()
+        thread = self._thread
+        if thread is None:
+            return
+        logger.info("Esperando o pedido em andamento terminar para trocar o microfone")
+        thread.join(SWAP_WAIT_SECONDS)
+        if thread.is_alive():
+            raise SetupError(
+                "O Cubô ainda está terminando um pedido e não deu para trocar o microfone agora. "
+                "A voz desliga quando ele terminar: ligue de novo pela página Início."
+            )
+        self._thread = None
+
+    def _use_microphone(self, microphone: Any) -> None:
         self._microphone = microphone
         self._loop.replace(microphone=microphone)
-        if was_running:
-            self.start()
 
     @staticmethod
     def _warm_up(*parts: Any) -> None:
@@ -190,11 +235,11 @@ class VoiceSession:
         )
         return UtteranceRecorder(self._detector, limits)
 
-    def _run(self) -> None:
+    def _run(self, microphone: Any, stop: threading.Event) -> None:
         try:
-            self._loop.run(self._stop)
+            self._loop.run(stop)
         except Exception as error:
             logger.exception("O ciclo de voz parou")
             self.error = str(error) or type(error).__name__
         finally:
-            self._microphone.close()
+            microphone.close()
