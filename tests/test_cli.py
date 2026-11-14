@@ -274,3 +274,30 @@ def test_waiting_ends_on_sigterm_and_restores_the_previous_handler():
         for timer in timers:
             timer.cancel()
         signal.signal(signal.SIGTERM, previous)
+
+
+def test_the_panel_line_comes_after_the_first_access_code(monkeypatch, capsys):
+    import cubo.web.app as web_app
+    from cubo.config import Config
+
+    monkeypatch.setattr(web_app, "run_panel", lambda *_args: None)
+    service = SimpleNamespace(config=Config())
+
+    cli._run_panel(service, default_config_dir())
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("Primeiro acesso: o painel vai pedir o código ")
+    assert lines[-1].startswith("Painel: http")
+
+
+def test_there_is_no_code_line_once_the_panel_has_a_password(monkeypatch, capsys):
+    import cubo.web.app as web_app
+    from cubo.config import Config
+    from cubo.web.auth import AUTH_FILE_NAME, PanelAuth
+
+    PanelAuth(default_config_dir() / AUTH_FILE_NAME).set_password("senha-segura-123")
+    monkeypatch.setattr(web_app, "run_panel", lambda *_args: None)
+
+    cli._run_panel(SimpleNamespace(config=Config()), default_config_dir())
+
+    assert [line.split(":")[0] for line in capsys.readouterr().out.splitlines()] == ["Painel"]

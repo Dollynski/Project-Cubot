@@ -155,9 +155,11 @@ def _run_panel(service, config_dir: Path) -> None:
 
     settings = service.config.panel
     auth = PanelAuth(config_dir / AUTH_FILE_NAME)
-    print("Painel: " + " ou ".join(panel_urls(settings)))
     if auth.setup_code:
         print(f"Primeiro acesso: o painel vai pedir o código {auth.setup_code}.")
+    # Esta linha vai por último: o instalador a usa como sinal de que o painel subiu e, a partir
+    # dela, já pode ler o código acima no log.
+    print("Painel: " + " ou ".join(panel_urls(settings)))
     run_panel(Panel(service, auth, LoginThrottle()), settings, config_dir / "nicegui")
 
 
