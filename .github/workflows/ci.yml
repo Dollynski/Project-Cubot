@@ -20,6 +20,8 @@ jobs:
         run: ruff check .
       - name: Check formatting
         run: ruff format --check .
+      - name: Shell scripts
+        run: shellcheck -x deploy/*.sh
       - name: Tests
         if: hashFiles('tests/**/*.py') != ''
         run: pytest
