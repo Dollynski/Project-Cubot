@@ -1,3 +1,4 @@
+import threading
 import time
 from types import SimpleNamespace
 
@@ -385,3 +386,100 @@ def test_the_streaming_option_changes_without_reloading_anything(loaders, tmp_pa
     assert loaders.calls == []
     assert session._loop.stream_speech is False
     assert session.settings.stream_speech is False
+
+
+class SlowMicrophone(FakeMicrophone):
+    """Só para de escutar quando liberado: faz de conta que está no meio de um pedido longo."""
+
+    def __init__(self, device, release):
+        super().__init__(device)
+        self.release = release
+
+    def frames(self, stop):
+        while not self.release.is_set():
+            self.release.wait(0.005)
+        return
+        yield
+
+
+def start_with_a_busy_microphone(loaders, tmp_path, monkeypatch, *, stop_wait, swap_wait):
+    """Sessão ligada, com um pedido longo em andamento que o teste libera quando quiser."""
+    monkeypatch.setattr(session_module, "STOP_TIMEOUT_SECONDS", stop_wait)
+    monkeypatch.setattr(session_module, "SWAP_WAIT_SECONDS", swap_wait)
+    release = threading.Event()
+    session = make_session(tmp_path)
+    busy = SlowMicrophone(None, release)
+    session._microphone = busy
+    session._loop.replace(microphone=busy)
+    session.start()
+    return session, busy, release
+
+
+def test_swapping_the_microphone_waits_for_the_request_in_progress(loaders, monkeypatch, tmp_path):
+    session, old, release = start_with_a_busy_microphone(
+        loaders, tmp_path, monkeypatch, stop_wait=0.05, swap_wait=5.0
+    )
+    threading.Timer(0.3, release.set).start()
+
+    changed = session.reconfigure(VoiceSettings(input_device="USB"))
+
+    new = loaders.microphones[-1]
+    assert changed == ["microfone"]
+    assert old.closed == 1
+    # O microfone novo não pode ser fechado pela thread antiga ao terminar.
+    assert (new.opened, new.closed) == (1, 0)
+    assert session.running
+    session.stop()
+    assert new.closed == 1
+
+
+def test_a_request_that_never_ends_leaves_the_session_unchanged(loaders, monkeypatch, tmp_path):
+    session, old, release = start_with_a_busy_microphone(
+        loaders, tmp_path, monkeypatch, stop_wait=0.02, swap_wait=0.05
+    )
+
+    try:
+        with pytest.raises(SetupError, match="terminando um pedido"):
+            session.reconfigure(VoiceSettings(input_device="USB", speech_speed=1.5))
+
+        assert session.settings == VoiceSettings()
+        session.say("oi")
+        assert spoken(loaders.synthesizers[0]) == ["oi"]
+        assert session._microphone is old
+    finally:
+        release.set()
+
+
+def test_a_new_microphone_that_does_not_open_brings_the_old_one_back(
+    loaders, monkeypatch, tmp_path
+):
+    session = make_session(tmp_path)
+    session.start()
+    old = loaders.microphones[0]
+    original_microphone = loaders._devices().Microphone
+
+    def broken_open():
+        raise SetupError("Não consegui abrir o microfone")
+
+    def make_broken(device):
+        microphone = original_microphone(device)
+        microphone.open = broken_open
+        return microphone
+
+    monkeypatch.setattr(
+        session_module,
+        "load_devices",
+        lambda: SimpleNamespace(
+            Microphone=make_broken, SoundDevicePlayer=loaders._devices().SoundDevicePlayer
+        ),
+    )
+    try:
+        with pytest.raises(SetupError, match="abrir o microfone"):
+            session.reconfigure(VoiceSettings(input_device="USB"))
+
+        assert session.settings == VoiceSettings()
+        assert session._microphone is old
+        assert session.running
+        assert old.opened == 2  # voltou a escutar pelo antigo
+    finally:
+        session.stop()
