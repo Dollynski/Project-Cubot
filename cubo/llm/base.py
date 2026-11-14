@@ -1,7 +1,7 @@
 """Contrato comum dos provedores de IA."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,9 +24,23 @@ class Exchange:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """Tokens gastos num pedido, somando todas as idas e voltas com a IA."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(
+            self.input_tokens + other.input_tokens, self.output_tokens + other.output_tokens
+        )
+
+
+@dataclass(frozen=True)
 class Reply:
     text: str
     exchange: Exchange
+    usage: Usage = Usage()
 
 
 class ProviderError(Exception):
@@ -70,6 +84,12 @@ class ProviderError(Exception):
         return cls.failed(provider, f"HTTP {status}")
 
     @classmethod
+    def limit_reached(cls, period: str) -> "ProviderError":
+        return cls(
+            f"Atingi o limite de chamadas à IA por {period}. Dá para ajustar esse limite no painel."
+        )
+
+    @classmethod
     def refused(cls) -> "ProviderError":
         return cls("Desculpe, não posso ajudar com isso.")
 
@@ -90,8 +110,12 @@ class ChatProvider(ABC):
         history: Sequence[Exchange],
         user_text: str,
         tools: ToolRegistry,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         """Responde ao pedido, executando as ferramentas que a IA chamar.
+
+        Com ``on_text``, o texto da resposta é entregue aos pedaços, conforme a IA o escreve, para
+        dar para começar a falar antes de ela terminar. O ``Reply`` final é o mesmo nos dois modos.
 
         Levanta ``ProviderError`` em qualquer falha do provedor.
         """

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cubo.toml_files import read_toml, write_toml
 
@@ -36,6 +36,9 @@ class LLMSettings(BaseModel):
     personality: str = DEFAULT_PERSONALITY
     memory_exchanges: int = Field(default=10, ge=1, le=100)
     memory_idle_minutes: int = Field(default=10, ge=1)
+    # Freio de custo: cada pedido à IA conta uma chamada. Zero desliga o limite.
+    max_calls_per_minute: int = Field(default=20, ge=0)
+    max_calls_per_day: int = Field(default=500, ge=0)
 
     @property
     def model(self) -> str:
@@ -67,9 +70,51 @@ class HomeAssistantSettings(BaseModel):
         return devices
 
 
+class VoiceSettings(BaseModel):
+    # Vazio usa o dispositivo padrão do sistema; aceita o número ou parte do nome (`cubo audio`).
+    input_device: str = ""
+    output_device: str = ""
+    # Modelo pronto (hey_jarvis, hey_livekit) ou caminho de um .onnx treinado.
+    wake_word: str = "hey_jarvis"
+    wake_word_threshold: float = Field(default=0.5, gt=0, lt=1)
+    silence_seconds: float = Field(default=0.8, gt=0)
+    max_listening_seconds: float = Field(default=15, gt=0)
+    whisper_model: str = "base"
+    whisper_compute_type: str = "int8"
+    piper_voice: str = "pt_BR-faber-medium"
+    speech_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    # Começa a falar na primeira frase, sem esperar a IA terminar de escrever a resposta.
+    stream_speech: bool = True
+
+
+class PanelSettings(BaseModel):
+    # "local" só atende neste aparelho; "network" atende também o resto da rede (celular, PC).
+    listen: Literal["local", "network"] = "local"
+    port: int = Field(default=8080, ge=1, le=65535)
+    # HTTPS é opcional: informe o certificado e a chave juntos.
+    ssl_certfile: str = ""
+    ssl_keyfile: str = ""
+
+    @property
+    def host(self) -> str:
+        return "127.0.0.1" if self.listen == "local" else "0.0.0.0"
+
+    @property
+    def https(self) -> bool:
+        return bool(self.ssl_certfile)
+
+    @model_validator(mode="after")
+    def certificate_needs_key(self) -> "PanelSettings":
+        if bool(self.ssl_certfile) != bool(self.ssl_keyfile):
+            raise ValueError("ssl_certfile e ssl_keyfile devem ser informados juntos")
+        return self
+
+
 class Config(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     home_assistant: HomeAssistantSettings = Field(default_factory=HomeAssistantSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    panel: PanelSettings = Field(default_factory=PanelSettings)
 
 
 def default_config_dir() -> Path:

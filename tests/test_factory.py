@@ -2,7 +2,9 @@ import pytest
 
 from cubo.config import LLMSettings
 from cubo.credentials import CredentialStore
-from cubo.llm.factory import SetupError, create_provider
+from cubo.errors import SetupError
+from cubo.llm import factory
+from cubo.llm.factory import create_provider
 
 
 @pytest.fixture
@@ -39,3 +41,34 @@ def test_ollama_needs_no_key_and_uses_the_configured_url(credentials):
 
     assert provider.name == "ollama"
     assert str(provider._client.base_url).startswith("http://placa.local:11434/v1")
+
+
+@pytest.mark.parametrize(
+    "provider, name",
+    [("gemini", "gemini"), ("claude", "claude"), ("openai", "openai"), ("ollama", "ollama")],
+)
+def test_build_provider_with_an_unsaved_key(provider, name):
+    built = factory.build_provider(
+        provider, api_key="chave-de-teste", model="", ollama_url="http://localhost:11434/v1"
+    )
+
+    assert built.name == name
+
+
+def test_list_models_uses_the_given_key_and_no_model(monkeypatch):
+    calls = []
+
+    class FakeProvider:
+        def list_models(self):
+            return ["modelo-a", "modelo-b"]
+
+    def fake_build(provider, **options):
+        calls.append((provider, options))
+        return FakeProvider()
+
+    monkeypatch.setattr(factory, "build_provider", fake_build)
+
+    models = factory.list_provider_models("claude", api_key="sk-nova", ollama_url="http://x/v1")
+
+    assert models == ["modelo-a", "modelo-b"]
+    assert calls == [("claude", {"api_key": "sk-nova", "model": "", "ollama_url": "http://x/v1"})]

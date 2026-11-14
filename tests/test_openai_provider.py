@@ -2,9 +2,10 @@ from types import SimpleNamespace
 
 import openai
 import pytest
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
 
-from cubo.llm.base import ProviderError
+from cubo.llm.base import ProviderError, Usage
 from cubo.llm.openai_compatible import OpenAICompatibleProvider
 from cubo.tools.registry import ToolRegistry
 from tests.fakes import REQUEST, home_tools, http_response
@@ -32,7 +33,9 @@ class FakeOpenAI:
     def __init__(self, *responses_or_errors):
         self.requests = []
         self._script = list(responses_or_errors)
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create, stream=self._stream)
+        )
 
     def _create(self, **request):
         self.requests.append(request)
@@ -41,13 +44,47 @@ class FakeOpenAI:
             raise step
         return step
 
+    def _stream(self, **request):
+        self.requests.append({**request, "streamed": True})
+        step = self._script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return FakeStream(step)
 
-def ask(client, tools=None, name="openai"):
+
+class FakeStream:
+    """Parecido com o fluxo do SDK: eventos de texto e a resposta final montada."""
+
+    def __init__(self, completion):
+        self._completion = completion
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info):
+        return False
+
+    def __iter__(self):
+        yield SimpleNamespace(type="chunk")
+        text = self._completion.choices[0].message.content or ""
+        for start in range(0, len(text), 4):
+            yield SimpleNamespace(type="content.delta", delta=text[start : start + 4])
+        yield SimpleNamespace(type="content.done")
+
+    def get_final_completion(self):
+        return self._completion
+
+
+def ask(client, tools=None, name="openai", on_text=None):
     provider = OpenAICompatibleProvider(
         name=name, display_name=name.capitalize(), api_key="sk-teste", model="m", client=client
     )
     return provider.reply(
-        system="Você é o Cubô.", history=(), user_text="Oi", tools=tools or ToolRegistry()
+        system="Você é o Cubô.",
+        history=(),
+        user_text="Oi",
+        tools=tools or ToolRegistry(),
+        on_text=on_text,
     )
 
 
@@ -110,3 +147,72 @@ def test_refusal_raises_provider_error():
 def test_translates_sdk_errors_with_the_provider_name(error, message):
     with pytest.raises(ProviderError, match=message):
         ask(FakeOpenAI(error), name="ollama")
+
+
+def with_usage(response, prompt_tokens, completion_tokens):
+    usage = CompletionUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+    return response.model_copy(update={"usage": usage})
+
+
+def test_sums_token_usage_across_tool_rounds():
+    client = FakeOpenAI(
+        with_usage(
+            completion(tool_calls=[("c1", "ler_estado", '{"dispositivo": "sala"}')]), 100, 10
+        ),
+        with_usage(completion("Ligada."), 150, 20),
+    )
+
+    assert ask(client, home_tools()).usage == Usage(250, 30)
+
+
+def test_server_without_usage_counts_zero_tokens():
+    # O Ollama e outros servidores compatíveis podem não informar o uso.
+    assert ask(FakeOpenAI(completion("Oi"))).usage == Usage()
+
+
+def test_streams_the_text_in_pieces_and_returns_the_same_reply():
+    pieces = []
+
+    streamed = ask(FakeOpenAI(completion("Olá, tudo bem?")), on_text=pieces.append)
+
+    assert "".join(pieces) == "Olá, tudo bem?"
+    assert len(pieces) > 1
+    assert streamed == ask(FakeOpenAI(completion("Olá, tudo bem?")))
+
+
+def test_streaming_asks_the_server_to_report_the_usage():
+    client = FakeOpenAI(completion("Oi"))
+
+    ask(client, on_text=lambda _piece: None)
+
+    assert client.requests[0]["stream_options"] == {"include_usage": True}
+    assert client.requests[0]["streamed"] is True
+
+
+def test_streaming_runs_the_tools_and_only_the_final_text_is_spoken():
+    client = FakeOpenAI(
+        completion(tool_calls=[("c1", "ler_estado", '{"dispositivo": "sala"}')]),
+        completion("A sala está ligada."),
+    )
+    pieces = []
+
+    reply = ask(client, home_tools(), on_text=pieces.append)
+
+    assert "".join(pieces) == "A sala está ligada."
+    assert reply.text == "A sala está ligada."
+
+
+def test_streaming_translates_sdk_errors():
+    error = openai.APIConnectionError(request=REQUEST)
+
+    with pytest.raises(ProviderError, match="Não consegui me conectar"):
+        ask(FakeOpenAI(error), on_text=lambda _piece: None)
+
+
+def test_streaming_refusal_raises_provider_error():
+    with pytest.raises(ProviderError, match="não posso ajudar"):
+        ask(FakeOpenAI(completion(refusal="Não posso.")), on_text=lambda _piece: None)

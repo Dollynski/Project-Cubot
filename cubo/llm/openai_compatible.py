@@ -1,12 +1,12 @@
 """Adaptador para a API de chat da OpenAI, que também atende o Ollama."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import openai
 
-from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply
+from cubo.llm.base import MAX_TOOL_ROUNDS, ChatProvider, Exchange, ProviderError, Reply, Usage
 from cubo.tools.registry import ToolRegistry
 
 
@@ -33,6 +33,7 @@ class OpenAICompatibleProvider(ChatProvider):
         history: Sequence[Exchange],
         user_text: str,
         tools: ToolRegistry,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         tool_specs = [
             {
@@ -48,15 +49,18 @@ class OpenAICompatibleProvider(ChatProvider):
         previous = [{"role": "system", "content": system}, *self.history_messages(history)]
         new_messages: list[dict[str, Any]] = [{"role": "user", "content": user_text}]
 
+        usage = Usage()
         for _ in range(MAX_TOOL_ROUNDS):
-            message = self._complete([*previous, *new_messages], tool_specs)
+            response = self._complete([*previous, *new_messages], tool_specs, on_text)
+            usage += _usage_of(response)
+            message = response.choices[0].message
             if message.refusal:
                 raise ProviderError.refused()
             calls = [call for call in message.tool_calls or [] if call.type == "function"]
             new_messages.append(_assistant_message(message.content, calls))
             if not calls:
                 text = (message.content or "").strip()
-                return Reply(text, Exchange(self.name, tuple(new_messages)))
+                return Reply(text, Exchange(self.name, tuple(new_messages)), usage)
             new_messages.extend(_tool_message(call, tools) for call in calls)
 
         raise ProviderError.too_many_tool_rounds()
@@ -67,15 +71,31 @@ class OpenAICompatibleProvider(ChatProvider):
         except openai.APIError as error:
             raise self._translate(error) from error
 
-    def _complete(self, messages: list[dict[str, Any]], tool_specs: list[dict[str, Any]]) -> Any:
+    def _complete(
+        self,
+        messages: list[dict[str, Any]],
+        tool_specs: list[dict[str, Any]],
+        on_text: Callable[[str], None] | None,
+    ) -> Any:
         options = {"tools": tool_specs} if tool_specs else {}
         try:
-            response = self._client.chat.completions.create(
-                model=self._model, messages=messages, **options
-            )
+            if on_text is None:
+                return self._client.chat.completions.create(
+                    model=self._model, messages=messages, **options
+                )
+            with self._client.chat.completions.stream(
+                model=self._model,
+                messages=messages,
+                # Sem isso o servidor não informa os tokens gastos no fim do streaming.
+                stream_options={"include_usage": True},
+                **options,
+            ) as stream:
+                for event in stream:
+                    if event.type == "content.delta":
+                        on_text(event.delta)
+                return stream.get_final_completion()
         except openai.APIError as error:
             raise self._translate(error) from error
-        return response.choices[0].message
 
     def _translate(self, error: openai.APIError) -> ProviderError:
         if isinstance(error, openai.APIStatusError):
@@ -83,6 +103,13 @@ class OpenAICompatibleProvider(ChatProvider):
         if isinstance(error, openai.APIConnectionError):
             return ProviderError.unreachable(self.display_name)
         return ProviderError.failed(self.display_name, type(error).__name__)
+
+
+def _usage_of(response: Any) -> Usage:
+    usage = getattr(response, "usage", None)  # alguns servidores, como o Ollama, podem omitir
+    return Usage(
+        getattr(usage, "prompt_tokens", 0) or 0, getattr(usage, "completion_tokens", 0) or 0
+    )
 
 
 def _assistant_message(content: str | None, calls: list[Any]) -> dict[str, Any]:
