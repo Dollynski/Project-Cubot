@@ -1,4 +1,7 @@
+import os
+import signal
 import stat
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -249,3 +252,25 @@ def test_password_reset_without_a_password_says_so(capsys):
 def test_password_command_needs_the_flag():
     with pytest.raises(SystemExit):
         cli.main(["senha"])
+
+
+def test_waiting_ends_on_sigterm_and_restores_the_previous_handler():
+    calls = []
+    previous = signal.signal(signal.SIGTERM, lambda *_: calls.append("padrão"))
+    # Se o tratamento sumir, o SIGINT de segurança encerra a espera e o teste falha em `calls`.
+    timers = [
+        threading.Timer(0.2, os.kill, args=(os.getpid(), signal.SIGTERM)),
+        threading.Timer(3.0, os.kill, args=(os.getpid(), signal.SIGINT)),
+    ]
+    try:
+        for timer in timers:
+            timer.start()
+        cli._wait_until_interrupted()
+        assert calls == []
+        # Quem estava instalado antes volta ao lugar depois da espera.
+        os.kill(os.getpid(), signal.SIGTERM)
+        assert calls == ["padrão"]
+    finally:
+        for timer in timers:
+            timer.cancel()
+        signal.signal(signal.SIGTERM, previous)

@@ -3,6 +3,7 @@
 import argparse
 import getpass
 import logging
+import signal
 import sys
 import threading
 import tomllib
@@ -161,10 +162,15 @@ def _run_panel(service, config_dir: Path) -> None:
 
 
 def _wait_until_interrupted() -> None:
+    """Espera até ``Ctrl+C`` ou ``SIGTERM``, que é o que o ``systemctl stop`` envia."""
+    stop = threading.Event()
+    previous = signal.signal(signal.SIGTERM, lambda *_: stop.set())
     try:
-        threading.Event().wait()
+        stop.wait()
     except KeyboardInterrupt:
         print()
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _show_event(event: Event) -> None:
