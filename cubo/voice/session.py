@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
@@ -75,7 +76,9 @@ class VoiceSession:
             assistant=assistant,
             speaker=self._speaker,
             on_event=on_event,
+            stream_speech=settings.stream_speech,
         )
+        self._warm_up(self._detector, wake_word, transcriber, self._speaker)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -151,7 +154,10 @@ class VoiceSession:
         if Part.INPUT in changed:
             microphone = devices.Microphone(parse_device(new.input_device))
 
+        # Aquece só o que é novo, antes de trocar: o primeiro pedido depois de salvar não demora.
+        self._warm_up(*parts.values())
         self._loop.replace(**parts)
+        self._loop.stream_speech = new.stream_speech
         if "speaker" in parts:
             self._synthesizer, self._player, self._speaker = synthesizer, player, parts["speaker"]
         if microphone is not None:
@@ -166,6 +172,17 @@ class VoiceSession:
         self._loop.replace(microphone=microphone)
         if was_running:
             self.start()
+
+    @staticmethod
+    def _warm_up(*parts: Any) -> None:
+        """Roda uma vez cada peça que sabe se aquecer (as outras, como o gravador, não precisam)."""
+        for part in parts:
+            if hasattr(part, "warm_up"):
+                started = time.monotonic()
+                part.warm_up()
+                logger.debug(
+                    "Aquecimento de %s: %.2f s", type(part).__name__, time.monotonic() - started
+                )
 
     def _recorder_for(self, settings: VoiceSettings) -> UtteranceRecorder:
         limits = ListeningLimits(

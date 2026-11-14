@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 from faster_whisper.vad import get_vad_model
 
-from cubo.voice.audio import SAMPLE_RATE
+from cubo.voice.audio import FRAME_SAMPLES, SAMPLE_RATE
 
 VAD_WINDOW_SAMPLES = 512  # 32 ms, a janela do Silero VAD
 VAD_CONTEXT_WINDOWS = 16  # cerca de 0,5 s de contexto em cada avaliação
@@ -21,6 +21,10 @@ class SpeechDetector:
         self._model = model if model is not None else get_vad_model()
         self._threshold = threshold
         self._recent = np.zeros(0, np.float32)
+
+    def warm_up(self) -> None:
+        self.is_speech(np.zeros(FRAME_SAMPLES, np.float32))
+        self.reset()
 
     def is_speech(self, frame: np.ndarray) -> bool:
         self._recent = np.concatenate([self._recent, frame])[

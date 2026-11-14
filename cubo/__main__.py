@@ -21,7 +21,7 @@ from cubo.migration import migrate_legacy_env
 from cubo.tools.home_assistant import HomeAssistantError
 from cubo.usage import USAGE_FILE_NAME, UsageTracker
 from cubo.voice import load_devices
-from cubo.voice.events import Event, Heard, Replied, StateChanged
+from cubo.voice.events import Event, Heard, Replied, StateChanged, Timed
 from cubo.voice.models import DownloadError, default_data_dir, prepare_models
 from cubo.web.auth import AUTH_FILE_NAME, PanelAuth
 
@@ -175,6 +175,8 @@ def _show_event(event: Event) -> None:
             print(f"você> {text}")
         case Replied(text):
             print(f"cubô> {text or '(sem resposta)'}")
+        case Timed(timing):
+            logger.debug("Tempos do pedido: %s", timing)
 
 
 def _run_text_mode(

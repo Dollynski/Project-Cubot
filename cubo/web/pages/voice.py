@@ -53,6 +53,7 @@ def build(panel: Panel) -> None:
                     "whisper_compute_type": compute_select.value,
                     "piper_voice": voice_select.value,
                     "speech_speed": speed.value,
+                    "stream_speech": stream_switch.value,
                 },
             )
         except ValidationError as error:
@@ -131,5 +132,12 @@ def build(panel: Panel) -> None:
         ).classes("w-full")
         speed = ui.slider(min=0.5, max=2.0, step=0.05, value=voice.speech_speed)
         ui.label().bind_text_from(speed, "value", lambda value: f"Velocidade: {value:.2f}x")
+        stream_switch = ui.switch(
+            "Começar a falar antes de a IA terminar de responder", value=voice.stream_speech
+        )
+        ui.label(
+            "Fala a primeira frase assim que ela fica pronta. Desligue se a voz atropelar "
+            "ou se o provedor não entregar a resposta aos poucos."
+        ).classes("text-sm opacity-70")
         ui.button("Ouvir a voz salva", icon="volume_up", on_click=speak_sample).props("outline")
     ui.button("Salvar", icon="save", on_click=save)

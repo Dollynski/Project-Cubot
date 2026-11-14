@@ -1,7 +1,7 @@
 """Contrato comum dos provedores de IA."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -110,8 +110,12 @@ class ChatProvider(ABC):
         history: Sequence[Exchange],
         user_text: str,
         tools: ToolRegistry,
+        on_text: Callable[[str], None] | None = None,
     ) -> Reply:
         """Responde ao pedido, executando as ferramentas que a IA chamar.
+
+        Com ``on_text``, o texto da resposta é entregue aos pedaços, conforme a IA o escreve, para
+        dar para começar a falar antes de ela terminar. O ``Reply`` final é o mesmo nos dois modos.
 
         Levanta ``ProviderError`` em qualquer falha do provedor.
         """

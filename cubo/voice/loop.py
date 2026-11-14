@@ -2,14 +2,17 @@
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterator
 from typing import Protocol
 
 import numpy as np
 
-from cubo.voice.events import Event, Heard, Replied, State, StateChanged
+from cubo.voice.events import Event, Heard, Replied, State, StateChanged, Timed
 from cubo.voice.listening import UtteranceRecorder
+from cubo.voice.speech_stream import SpeechStream
 from cubo.voice.stt import Transcriber
+from cubo.voice.timing import Stopwatch
 from cubo.voice.tts import Speaker
 from cubo.voice.wake_word import WakeWordDetector
 
@@ -23,7 +26,7 @@ REPLACEABLE_PARTS = frozenset(
 
 
 class Replier(Protocol):
-    def reply(self, user_text: str) -> str:
+    def reply(self, user_text: str, on_text: Callable[[str], None] | None = None) -> str:
         """Responde ao que foi dito, já em texto pronto para falar."""
         ...
 
@@ -48,6 +51,8 @@ class VoiceLoop:
         assistant: Replier,
         speaker: Speaker,
         on_event: Callable[[Event], None] = lambda _event: None,
+        clock: Callable[[], float] = time.monotonic,
+        stream_speech: bool = True,
     ) -> None:
         self._microphone = microphone
         self._wake_word = wake_word
@@ -56,6 +61,8 @@ class VoiceLoop:
         self._assistant = assistant
         self._speaker = speaker
         self._on_event = on_event
+        self._clock = clock
+        self.stream_speech = stream_speech
         self.mic_level = 0.0  # volume do último quadro (RMS), para o painel mostrar
 
     def replace(self, **parts: object) -> None:
@@ -99,15 +106,38 @@ class VoiceLoop:
         if audio is None:
             return
 
+        stopwatch = Stopwatch(self._clock)  # conta a partir do fim da gravação
         self._on_event(StateChanged(State.TRANSCRIBING))
         text = self._transcriber.transcribe(audio)
+        stopwatch.mark("transcribed")
         if not text:
             return
         self._on_event(Heard(text))
 
         self._on_event(StateChanged(State.THINKING))
-        reply = self._assistant.reply(text)
-        self._on_event(Replied(reply))
+        self._answer(text, stopwatch)
+        self._on_event(Timed(stopwatch.timing()))
 
-        self._on_event(StateChanged(State.SPEAKING))
-        self._speaker.say(reply)
+    def _answer(self, text: str, stopwatch: Stopwatch) -> None:
+        """Pede a resposta e fala, começando pela primeira frase se a IA a entregar aos poucos."""
+
+        def first_sound() -> None:
+            stopwatch.mark("first_sound")
+            self._on_event(StateChanged(State.SPEAKING))
+
+        speech = SpeechStream(self._speaker, on_first_sound=first_sound)
+
+        def on_text(piece: str) -> None:
+            if piece.strip():
+                stopwatch.mark("first_text")
+            speech.feed(piece)
+
+        reply = ""
+        try:
+            reply = self._assistant.reply(text, on_text=on_text if self.stream_speech else None)
+            stopwatch.mark("replied")
+            self._on_event(Replied(reply))
+        finally:
+            # Se nada chegou aos poucos (resposta inteira ou mensagem de erro), fala a resposta.
+            speech.finish(fallback=reply)
+            stopwatch.mark("done")

@@ -4,7 +4,13 @@ from nicegui import run, ui
 
 from cubo.web.layout import section
 from cubo.web.panel import Panel
-from cubo.web.widgets import STATE_COLORS, problem_card, usage_summary, warning_card
+from cubo.web.widgets import (
+    STATE_COLORS,
+    latency_summary,
+    problem_card,
+    usage_summary,
+    warning_card,
+)
 
 # O volume (RMS) da fala fica perto de 0,1; a barra amplia para ficar legível.
 LEVEL_GAIN = 6.0
@@ -57,15 +63,25 @@ def build(panel: Panel) -> None:
     def usage() -> None:
         usage_summary(service)
 
+    @ui.refreshable
+    def latency() -> None:
+        latency_summary(service.activity.timings())
+
     status()
     with section("Microfone"):
         level = ui.linear_progress(value=0, show_value=False).props("instant-feedback")
     with section("Conversa recente"):
         conversation()
+    with section("Tempo de resposta"):
+        latency()
     with section("Uso da IA"):
         usage()
 
-    shown = {"entries": len(service.activity.entries()), "state": service.activity.state}
+    shown = {
+        "entries": len(service.activity.entries()),
+        "timings": len(service.activity.timings()),
+        "state": service.activity.state,
+    }
 
     def tick() -> None:
         voice = service.voice
@@ -75,6 +91,9 @@ def build(panel: Panel) -> None:
             shown["entries"] = len(entries)
             conversation.refresh()
             usage.refresh()
+        if len(service.activity.timings()) != shown["timings"]:
+            shown["timings"] = len(service.activity.timings())
+            latency.refresh()
         if service.activity.state != shown["state"]:
             shown["state"] = service.activity.state
             status.refresh()

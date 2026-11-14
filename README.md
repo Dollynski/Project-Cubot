@@ -129,9 +129,22 @@ whisper_model = "base"          # tiny, base, small... (maior = mais preciso e m
 whisper_compute_type = "int8"
 piper_voice = "pt_BR-faber-medium"
 speech_speed = 1.0              # de 0,5 a 2
+stream_speech = true            # fala a primeira frase sem esperar a IA terminar
 ```
 
+O Cubô fala **frase por frase enquanto a IA ainda escreve a resposta**, em vez de esperar a resposta inteira (dá para desligar em **Voz e fala**). Ao iniciar, e ao trocar um modelo no painel, os modelos são "aquecidos" com uma execução de teste, para o primeiro pedido não pagar a inicialização.
+
 Sem a voz do Piper, o Cubô usa o `espeak-ng` (`sudo apt install espeak-ng`), se estiver instalado, com um aviso.
+
+### Medir e comparar modelos
+
+O script `scripts/bench.py` mede, na máquina em que for rodado (por exemplo, a Orange Pi), quanto tempo cada modelo do Whisper leva e quanto erra. As frases do teste são geradas pela própria voz do Piper, então não precisa gravar nada:
+
+```bash
+python scripts/bench.py --modelos base,small --baixar
+```
+
+A tabela mostra o tempo de carga, o tempo por frase, o "fator" (tempo gasto por segundo de áudio; abaixo de 1 é mais rápido que a fala) e a proporção de palavras erradas. Sem `--baixar`, ele só usa os modelos já baixados.
 
 ## Painel web
 
@@ -141,7 +154,7 @@ No **primeiro acesso** o painel pede uma senha nova e o **código que o terminal
 
 Páginas:
 
-- **Início:** o que o Cubô está fazendo (aguardando, ouvindo, pensando, falando), o volume do microfone, a conversa recente e o uso da IA.
+- **Início:** o que o Cubô está fazendo (aguardando, ouvindo, pensando, falando), o volume do microfone, a conversa recente, o **tempo de resposta por etapa** (transcrição, IA, começar a falar) e o uso da IA.
 - **Áudio:** escolha do microfone e do alto-falante, com teste de som.
 - **Voz e fala:** palavra de ativação e sensibilidade, tempo de silêncio, modelo do Whisper e voz do Piper. Se faltar algum modelo, o painel avisa o tamanho e oferece baixar.
 - **IA:** provedor, modelo, chave de API, personalidade, memória e limites de uso.

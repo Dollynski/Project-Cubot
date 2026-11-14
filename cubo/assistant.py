@@ -1,6 +1,7 @@
 """Núcleo do Cubô: recebe o pedido em texto e devolve a resposta pronta para ser falada."""
 
 import logging
+from collections.abc import Callable
 
 from cubo.llm.base import ChatProvider, ProviderError
 from cubo.llm.memory import ConversationMemory
@@ -27,8 +28,12 @@ class Assistant:
         self._system_prompt = system_prompt
         self._usage = usage
 
-    def reply(self, user_text: str) -> str:
-        """Responde ao pedido. Falhas do provedor viram uma frase explicando o problema."""
+    def reply(self, user_text: str, on_text: Callable[[str], None] | None = None) -> str:
+        """Responde ao pedido. Falhas do provedor viram uma frase explicando o problema.
+
+        Com ``on_text``, o texto da resposta também é entregue aos pedaços, assim que a IA o escreve
+        (ainda sem a limpeza para fala, que fica a cargo de quem consome).
+        """
         try:
             if self._usage is not None:
                 self._usage.acquire()
@@ -37,6 +42,7 @@ class Assistant:
                 history=self._memory.history(),
                 user_text=user_text,
                 tools=self._tools,
+                on_text=on_text,
             )
         except ProviderError as error:
             # Já tratada e comunicada ao usuário na resposta; fica registrada só em INFO.

@@ -13,15 +13,18 @@ class FakeProvider(ChatProvider):
     name = "falso"
     display_name = "Falso"
 
-    def __init__(self, *, text="", error=None):
+    def __init__(self, *, text="", error=None, pieces=()):
         self._text = text
         self._error = error
+        self._pieces = pieces
         self.histories = []
 
-    def reply(self, *, system, history, user_text, tools):
+    def reply(self, *, system, history, user_text, tools, on_text=None):
         self.histories.append(history)
         if self._error:
             raise self._error
+        for piece in self._pieces if on_text else ():
+            on_text(piece)
         return Reply(self._text, Exchange(self.name, (user_text,)))
 
     def list_models(self):
@@ -98,3 +101,33 @@ def test_tokens_of_each_reply_are_counted():
         120,
         8,
     )
+
+
+def test_text_is_delivered_in_pieces_and_the_full_reply_is_still_returned():
+    provider = FakeProvider(text="**Pronto!** Liguei.", pieces=["**Pron", "to!** Li", "guei."])
+    assistant = make_assistant(provider)
+    pieces = []
+
+    answer = assistant.reply("liga a luz", on_text=pieces.append)
+
+    assert pieces == ["**Pron", "to!** Li", "guei."]
+    assert answer == "Pronto! Liguei."
+
+
+def test_without_a_callback_nothing_is_streamed():
+    provider = FakeProvider(text="Oi.", pieces=["Oi."])
+
+    assert make_assistant(provider).reply("oi") == "Oi."
+
+
+def test_a_blocked_call_never_streams_anything():
+    provider = FakeProvider(text="oi", pieces=["oi"])
+    usage = UsageTracker(max_calls_per_minute=1, clock=lambda: datetime(2026, 1, 1))
+    assistant = make_assistant(provider, usage)
+    assistant.reply("primeiro")
+    pieces = []
+
+    answer = assistant.reply("segundo", on_text=pieces.append)
+
+    assert pieces == []
+    assert "limite de chamadas" in answer

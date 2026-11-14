@@ -25,7 +25,9 @@ class FakeAnthropic:
     def __init__(self, *responses_or_errors):
         self.requests = []
         self._script = list(responses_or_errors)
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+        self.beta = SimpleNamespace(
+            messages=SimpleNamespace(create=self._create, stream=self._stream)
+        )
 
     def _create(self, **request):
         self.requests.append(request)
@@ -34,17 +36,48 @@ class FakeAnthropic:
             raise step
         return step
 
+    def _stream(self, **request):
+        self.requests.append({**request, "streamed": True})
+        step = self._script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return FakeStream(step)
+
+
+class FakeStream:
+    """Parecido com o fluxo do SDK: entrega o texto em pedaços e a mensagem final montada."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info):
+        return False
+
+    @property
+    def text_stream(self):
+        for block in self._message.content:
+            if block.type == "text":
+                text = block.text
+                yield from (text[start : start + 4] for start in range(0, len(text), 4))
+
+    def get_final_message(self):
+        return self._message
+
 
 def provider(client, model="claude-opus-5-5"):
     return ClaudeProvider(api_key="sk-teste", model=model, client=client)
 
 
-def ask(claude, history=(), tools=None):
+def ask(claude, history=(), tools=None, on_text=None):
     return claude.reply(
         system="Você é o Cubô.",
         history=history,
         user_text="Oi",
         tools=tools or ToolRegistry(),
+        on_text=on_text,
     )
 
 
@@ -196,3 +229,56 @@ def test_sums_token_usage_including_the_prompt_cache():
 
 def test_response_without_usage_counts_zero_tokens():
     assert ask(provider(FakeAnthropic(response("end_turn", text("Oi"))))).usage == Usage()
+
+
+def test_streams_the_text_in_pieces_and_returns_the_same_reply():
+    streamed = FakeAnthropic(response("end_turn", text("Olá, tudo bem?")))
+    plain = FakeAnthropic(response("end_turn", text("Olá, tudo bem?")))
+    pieces = []
+
+    reply = ask(provider(streamed), on_text=pieces.append)
+
+    assert "".join(pieces) == "Olá, tudo bem?"
+    assert len(pieces) > 1
+    assert reply == ask(provider(plain))
+
+
+def test_streaming_sends_the_same_options_as_the_plain_call():
+    streamed = FakeAnthropic(response("end_turn", text("Oi")))
+    plain = FakeAnthropic(response("end_turn", text("Oi")))
+
+    ask(provider(streamed), on_text=lambda _piece: None)
+    ask(provider(plain))
+
+    request = dict(streamed.requests[0])
+    assert request.pop("streamed") is True
+    assert request == plain.requests[0]
+
+
+def test_streaming_runs_the_tools_and_only_the_final_text_is_spoken():
+    client = FakeAnthropic(
+        response("tool_use", tool_use("t1", "ler_estado", {"dispositivo": "sala"})),
+        response("end_turn", text("A sala está ligada.")),
+    )
+    pieces = []
+
+    reply = ask(provider(client), tools=home_tools(), on_text=pieces.append)
+
+    assert "".join(pieces) == "A sala está ligada."
+    assert reply.text == "A sala está ligada."
+    assert [request["streamed"] for request in client.requests] == [True, True]
+
+
+def test_streaming_translates_sdk_errors():
+    error = anthropic.APIConnectionError(request=REQUEST)
+
+    with pytest.raises(ProviderError, match="Não consegui me conectar"):
+        ask(provider(FakeAnthropic(error)), on_text=lambda _piece: None)
+
+
+def test_streaming_counts_the_tokens_of_the_final_message():
+    message = with_usage(response("end_turn", text("Oi")), input_tokens=10, output_tokens=2)
+
+    reply = ask(provider(FakeAnthropic(message)), on_text=lambda _piece: None)
+
+    assert reply.usage == Usage(10, 2)
