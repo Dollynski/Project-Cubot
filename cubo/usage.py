@@ -1,8 +1,10 @@
 """Uso da IA: limite de chamadas por minuto e por dia, e contador de tokens."""
 
+import fcntl
 import threading
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,7 +28,9 @@ class UsageSnapshot:
 class UsageTracker:
     """Controla quantas chamadas à IA foram feitas e quantos tokens elas gastaram.
 
-    O total do dia fica num arquivo, para o limite diário valer também depois de reiniciar.
+    O total do dia fica num arquivo compartilhado: vale também depois de reiniciar e soma o que
+    outros processos do Cubô (como o modo texto rodando junto com o serviço) fizeram no dia. O
+    limite por minuto, ao contrário, é de cada processo.
     """
 
     def __init__(
@@ -45,7 +49,7 @@ class UsageTracker:
         self._max_per_day = max_calls_per_day
         self._day = clock().date()
         self._calls = self._input_tokens = self._output_tokens = 0
-        self._load()
+        self._sync(clock())
 
     def set_limits(self, *, max_calls_per_minute: int, max_calls_per_day: int) -> None:
         with self._lock:
@@ -54,9 +58,9 @@ class UsageTracker:
 
     def acquire(self) -> None:
         """Registra uma chamada. Levanta ``ProviderError`` se algum limite já foi atingido."""
-        with self._lock:
+        with self._lock, self._shared_file():
             now = self._clock()
-            self._roll_day(now)
+            self._sync(now)
             self._forget_old_calls(now)
             if self._max_per_minute and len(self._recent) >= self._max_per_minute:
                 raise ProviderError.limit_reached("minuto")
@@ -67,8 +71,8 @@ class UsageTracker:
             self._save()
 
     def add_tokens(self, usage: Usage) -> None:
-        with self._lock:
-            self._roll_day(self._clock())
+        with self._lock, self._shared_file():
+            self._sync(self._clock())
             self._input_tokens += usage.input_tokens
             self._output_tokens += usage.output_tokens
             self._save()
@@ -76,7 +80,7 @@ class UsageTracker:
     def snapshot(self) -> UsageSnapshot:
         with self._lock:
             now = self._clock()
-            self._roll_day(now)
+            self._sync(now)
             self._forget_old_calls(now)
             return UsageSnapshot(
                 calls_last_minute=len(self._recent),
@@ -87,25 +91,39 @@ class UsageTracker:
                 max_calls_per_day=self._max_per_day,
             )
 
+    @contextmanager
+    def _shared_file(self) -> Iterator[None]:
+        """Trava o total do dia entre processos, para ler, somar e gravar sem perder ninguém."""
+        if self._path is None:
+            yield
+            return
+        self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with self._path.with_name(f"{self._path.name}.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
     def _forget_old_calls(self, now: datetime) -> None:
         limit = now - timedelta(minutes=1)
         while self._recent and self._recent[0] <= limit:
             self._recent.popleft()
 
-    def _roll_day(self, now: datetime) -> None:
-        if now.date() != self._day:
-            self._day = now.date()
-            self._calls = self._input_tokens = self._output_tokens = 0
-            self._save()
-
-    def _load(self) -> None:
+    def _sync(self, now: datetime) -> None:
+        """Põe na memória o total de hoje. O arquivo manda: outro processo pode ter somado."""
+        today = now.date()
         if self._path is None:
+            if today != self._day:
+                self._calls = self._input_tokens = self._output_tokens = 0
+            self._day = today
             return
         data = read_toml(self._path)
-        if data.get("date") == self._day.isoformat():
-            self._calls = int(data.get("calls", 0))
-            self._input_tokens = int(data.get("input_tokens", 0))
-            self._output_tokens = int(data.get("output_tokens", 0))
+        same_day = data.get("date") == today.isoformat()
+        self._day = today
+        self._calls = int(data.get("calls", 0)) if same_day else 0
+        self._input_tokens = int(data.get("input_tokens", 0)) if same_day else 0
+        self._output_tokens = int(data.get("output_tokens", 0)) if same_day else 0
 
     def _save(self) -> None:
         if self._path is None:
