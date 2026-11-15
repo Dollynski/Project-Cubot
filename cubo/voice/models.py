@@ -52,13 +52,20 @@ def whisper_dir(data_dir: Path) -> Path:
     return data_dir / "whisper"
 
 
+def wake_word_intact(name: str, data_dir: Path) -> bool:
+    """O modelo pronto está na pasta, é um arquivo comum e confere com o SHA-256 fixado."""
+    expected = WAKE_WORD_SHA256.get(name)
+    path = wake_word_path(name, data_dir)
+    return expected is not None and path.is_file() and _sha256_of_file(path) == expected
+
+
 def download_wake_word(name: str, data_dir: Path, http: httpx2.Client) -> Path:
     """Baixa um modelo pronto de wake word, se ainda não estiver na pasta e íntegro."""
     if name not in WAKE_WORD_SHA256:
         raise DownloadError(f"{name} não é um modelo pronto; informe o caminho de um .onnx.")
     target = wake_word_path(name, data_dir)
     expected = WAKE_WORD_SHA256[name]
-    if target.exists() and _sha256(target.read_bytes()) == expected:
+    if wake_word_intact(name, data_dir):
         return target
     try:
         response = http.get(WAKE_WORD_URL.format(name=name), follow_redirects=True)
@@ -117,9 +124,8 @@ def whisper_downloaded(model: str, data_dir: Path) -> bool:
 def missing_models(settings: VoiceSettings, data_dir: Path) -> list[str]:
     """O que a configuração pede e ainda não foi baixado, com o tamanho aproximado."""
     missing = []
-    if (
-        settings.wake_word in WAKE_WORD_SHA256
-        and not wake_word_path(settings.wake_word, data_dir).exists()
+    if settings.wake_word in WAKE_WORD_SHA256 and not wake_word_intact(
+        settings.wake_word, data_dir
     ):
         missing.append(f"palavra de ativação '{settings.wake_word}' (cerca de {WAKE_WORD_MB} MB)")
     voice = piper_voice_path(settings.piper_voice, data_dir)
@@ -153,3 +159,11 @@ def prepare_models(
 
 def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _sha256_of_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
