@@ -15,6 +15,7 @@ from cubo.voice.models import (
     missing_models,
     piper_voice_path,
     prepare_models,
+    wake_word_intact,
     wake_word_path,
     whisper_dir,
     whisper_downloaded,
@@ -198,13 +199,13 @@ def test_everything_is_missing_in_an_empty_data_dir(tmp_path):
     assert "modelo de transcrição 'base' (cerca de 145 MB)" in missing[2]
 
 
-def test_nothing_is_missing_when_the_files_are_there(tmp_path, monkeypatch):
+def test_nothing_is_missing_when_the_files_are_there(tmp_path, monkeypatch, pinned_model):
     settings = VoiceSettings()
     wake = wake_word_path(settings.wake_word, tmp_path)
     voice = piper_voice_path(settings.piper_voice, tmp_path)
     for path in (wake, voice, voice.with_name(f"{voice.name}.json")):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"x")
+        path.write_bytes(CONTENT if path == wake else b"x")
     monkeypatch.setattr(models, "whisper_downloaded", lambda *_: True)
 
     assert missing_models(settings, tmp_path) == []
@@ -232,3 +233,41 @@ def test_prepare_downloads_everything_and_reports_progress(tmp_path, monkeypatch
 
     assert done == ["hey_jarvis", "pt_BR-faber-medium", "base"]
     assert len(messages) == 3
+
+
+def test_a_truncated_wake_word_counts_as_missing_so_the_panel_offers_the_repair(
+    tmp_path, monkeypatch, pinned_model
+):
+    settings = VoiceSettings()
+    wake = wake_word_path(settings.wake_word, tmp_path)
+    wake.parent.mkdir(parents=True)
+    wake.write_bytes(CONTENT[:5])
+    monkeypatch.setattr(models, "whisper_downloaded", lambda *_: True)
+    voice = piper_voice_path(settings.piper_voice, tmp_path)
+    voice.parent.mkdir(parents=True)
+    voice.write_bytes(b"x")
+    voice.with_name(f"{voice.name}.json").write_bytes(b"{}")
+
+    missing = missing_models(settings, tmp_path)
+
+    assert len(missing) == 1
+    assert "palavra de ativação 'hey_jarvis'" in missing[0]
+
+
+@pytest.mark.parametrize(
+    "content, expected",
+    [(CONTENT, True), (CONTENT[:5], False), (b"", False), (b"outro conteudo qualquer", False)],
+)
+def test_wake_word_integrity_follows_the_pinned_hash(tmp_path, pinned_model, content, expected):
+    wake = wake_word_path("hey_jarvis", tmp_path)
+    wake.parent.mkdir(parents=True)
+    wake.write_bytes(content)
+
+    assert wake_word_intact("hey_jarvis", tmp_path) is expected
+
+
+def test_a_missing_wake_word_or_a_folder_or_an_unknown_name_is_not_intact(tmp_path, pinned_model):
+    assert wake_word_intact("hey_jarvis", tmp_path) is False
+    wake_word_path("hey_jarvis", tmp_path).mkdir(parents=True)
+    assert wake_word_intact("hey_jarvis", tmp_path) is False
+    assert wake_word_intact("nao_existe", tmp_path) is False
