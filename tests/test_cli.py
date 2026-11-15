@@ -249,3 +249,18 @@ def test_password_reset_without_a_password_says_so(capsys):
 def test_password_command_needs_the_flag():
     with pytest.raises(SystemExit):
         cli.main(["senha"])
+
+
+def test_a_corrupted_wake_word_stops_the_voice_with_a_message_not_a_traceback(monkeypatch, capsys):
+    from cubo.voice.models import default_data_dir, wake_word_path
+
+    configure_gemini_key()
+    path = wake_word_path("hey_jarvis", default_data_dir())
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"cortado no meio")
+
+    assert cli.main(["--sem-painel"]) == 2
+
+    error = capsys.readouterr().err
+    assert "corrompido ou incompleto" in error
+    assert "cubo preparar" in error
