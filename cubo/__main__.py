@@ -114,7 +114,7 @@ def _run_service(
         config_path=config_dir / CONFIG_FILE_NAME,
         credentials=credentials,
         data_dir=data_dir,
-        usage=UsageTracker(data_dir / USAGE_FILE_NAME),
+        usage=_usage_tracker(config),
         voice_factory=VoiceSession if voice else None,
         on_event=_show_event,
     )
@@ -212,11 +212,20 @@ def _run_text_mode(
     return 0
 
 
+def _usage_tracker(config: Config) -> UsageTracker:
+    """O controle de uso do dia, igual em todos os modos: o mesmo arquivo e os limites da config."""
+    return UsageTracker(
+        default_data_dir() / USAGE_FILE_NAME,
+        max_calls_per_minute=config.llm.max_calls_per_minute,
+        max_calls_per_day=config.llm.max_calls_per_day,
+    )
+
+
 def _open_runtime(config_dir: Path, credentials: CredentialStore) -> tuple[Config, Runtime] | None:
     """Carrega a configuração e monta o assistente. Mostra o erro e devolve ``None`` se falhar."""
     try:
         config = _load_or_migrate_config(config_dir, credentials)
-        runtime = build_runtime(config, credentials)
+        runtime = build_runtime(config, credentials, _usage_tracker(config))
     except (SetupError, ValidationError, tomllib.TOMLDecodeError) as error:
         print(f"Erro de configuração: {error}", file=sys.stderr)
         return None
