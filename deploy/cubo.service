@@ -1,0 +1,27 @@
+# Modelo da unidade do Cubô, como serviço do usuário (systemctl --user).
+# O deploy/install.sh troca o marcador de pasta abaixo pela pasta do projeto e instala em
+# ~/.config/systemd/user/cubo.service.
+
+[Unit]
+Description=Cubô, assistente de voz em português
+Documentation=https://github.com/Dollynski/Project-Cubot
+# Se o Cubô cair 10 vezes em 5 minutos, o systemd para de tentar e o problema aparece no log.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# Sem aspas: o systemd recusa aspas em WorkingDirectory, e espaços no caminho funcionam assim.
+WorkingDirectory=@INSTALL_DIR@
+ExecStart="@INSTALL_DIR@/.venv/bin/cubo"
+# Sem isso, o código do primeiro acesso só apareceria no journalctl depois de um tempo.
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+# Erro de configuração (código 2): reiniciar não resolve, é preciso corrigir o arquivo.
+RestartPreventExitStatus=2
+TimeoutStopSec=20
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

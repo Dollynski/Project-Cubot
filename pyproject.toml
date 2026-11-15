@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["anyio", "pytest", "ruff"]
+dev = ["anyio", "pytest", "ruff", "shellcheck-py"]
 
 [project.scripts]
 cubo = "cubo.__main__:main"
