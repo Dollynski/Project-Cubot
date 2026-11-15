@@ -1,4 +1,5 @@
 import stat
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,14 +8,15 @@ import pytest
 import cubo.__main__ as cli
 from cubo.assistant import Assistant
 from cubo.bootstrap import Runtime
-from cubo.config import default_config_dir, load_config
+from cubo.config import Config, default_config_dir, load_config, save_config
 from cubo.credentials import CredentialStore
 from cubo.errors import SetupError
+from cubo.llm.base import Reply, Usage
 from cubo.llm.memory import ConversationMemory
 from cubo.tools.registry import ToolRegistry
 from cubo.voice import models
 from cubo.voice.events import Heard, Replied
-from cubo.voice.models import DownloadError
+from cubo.voice.models import DownloadError, default_data_dir
 from tests.test_assistant import FakeProvider
 
 
@@ -249,3 +251,70 @@ def test_password_reset_without_a_password_says_so(capsys):
 def test_password_command_needs_the_flag():
     with pytest.raises(SystemExit):
         cli.main(["senha"])
+
+
+class UsingTokens(FakeProvider):
+    """Provedor falso que informa o gasto de tokens de cada resposta."""
+
+    def reply(self, **kwargs):
+        reply = super().reply(**kwargs)
+        return Reply(reply.text, reply.exchange, Usage(10, 2))
+
+
+def run_text_mode(monkeypatch, provider, requests):
+    monkeypatch.setattr("cubo.bootstrap.create_provider", lambda *_args: provider)
+    lines = iter(requests)
+
+    def fake_input(_prompt):
+        try:
+            return next(lines)
+        except StopIteration:
+            raise EOFError from None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert cli.main(["texto"]) == 0
+
+
+def usage_file():
+    return default_data_dir() / "usage.toml"
+
+
+def test_text_mode_counts_calls_and_tokens_in_the_shared_file(monkeypatch):
+    run_text_mode(monkeypatch, UsingTokens(text="oi"), ["olá", "e aí"])
+
+    data = tomllib.loads(usage_file().read_text())
+    assert (data["calls"], data["input_tokens"], data["output_tokens"]) == (2, 20, 4)
+
+
+def test_text_mode_respects_the_daily_limit_from_the_config(monkeypatch, capsys):
+    config = Config()
+    config.llm.max_calls_per_day = 1
+    save_config(config, default_config_dir() / "config.toml")
+    provider = FakeProvider(text="resposta")
+
+    run_text_mode(monkeypatch, provider, ["primeiro", "segundo"])
+
+    output = capsys.readouterr().out
+    assert "cubô> resposta" in output
+    assert "limite de chamadas" in output
+    assert len(provider.histories) == 1
+
+
+def test_text_mode_adds_to_what_the_service_already_spent(monkeypatch):
+    from cubo.usage import UsageTracker
+
+    UsageTracker(usage_file()).acquire()
+
+    run_text_mode(monkeypatch, UsingTokens(text="oi"), ["olá"])
+
+    assert tomllib.loads(usage_file().read_text())["calls"] == 2
+
+
+def test_every_mode_builds_the_tracker_from_the_same_file_and_limits():
+    config = Config()
+    config.llm.max_calls_per_minute = 7
+    config.llm.max_calls_per_day = 70
+
+    snapshot = cli._usage_tracker(config).snapshot()
+
+    assert (snapshot.max_calls_per_minute, snapshot.max_calls_per_day) == (7, 70)
